@@ -1,0 +1,2829 @@
+using FCC.FinancialPortal.Domain;
+using FCC.FinancialPortal.Domain.Constants;
+using FCC.FinancialPortal.Domain.Enum;
+using FCC.FinancialPortal.Domain.GridHelpers;
+using FCC.FinancialPortal.Domain.Interface;
+using System;
+using System.Collections;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Data.SqlClient;
+using System.Linq;
+using System.Reflection;
+using FCC.FinancialPortal.Domain.UCM;
+using FCC.FinancialPortal.Domain.Workflow;
+using NUnit.Framework;
+
+namespace FCC.FinancialPortal.DataAccess.InMemory
+{
+	/// <summary>
+	/// This class implements the interface methods for IDataReader and IDataWriter.
+	/// All the methods return data specifically generated for the tests.
+	/// </summary>
+	public class ReconciliationDatabaseInMemory : IDataReader, IDataWriter
+	{
+		static readonly ConcurrentDictionary<int, ClassificationTypeData> ClassificationTypes = new ConcurrentDictionary<int, ClassificationTypeData>();
+		static readonly ConcurrentDictionary<int, StatementData> Statements = new ConcurrentDictionary<int, StatementData>();
+		static readonly ConcurrentDictionary<int, ReconciliationDayData> ReconciliationDays = new ConcurrentDictionary<int, ReconciliationDayData>();
+		static readonly ConcurrentDictionary<int, ReconciliationDayBalanceData> ReconciliationDayBalances = new ConcurrentDictionary<int, ReconciliationDayBalanceData>();
+		static readonly ConcurrentDictionary<int, PostedPaymentStatusData> PostedPaymentStatuses = new ConcurrentDictionary<int, PostedPaymentStatusData>();
+		static readonly ConcurrentDictionary<int, ReconciliationItemSummary> ReconciliationItemSummaries = new ConcurrentDictionary<int, ReconciliationItemSummary>();
+		static readonly ConcurrentDictionary<int, ReconciliationItemRelationship> ReconciliationItemRelationships = new ConcurrentDictionary<int, ReconciliationItemRelationship>();
+		static readonly ConcurrentDictionary<int, PostedPaymentData> PostedPayments = new ConcurrentDictionary<int, PostedPaymentData>();
+		static readonly ConcurrentDictionary<int, BankTransactionData> BankTransactions = new ConcurrentDictionary<int, BankTransactionData>();
+		static readonly ConcurrentDictionary<int, BankTransactionTransferRelationship> BankTransactionTransferRelationshps = new ConcurrentDictionary<int, BankTransactionTransferRelationship>();
+		static readonly ConcurrentDictionary<int, UcmTransactionData> UcmTransactions = new ConcurrentDictionary<int, UcmTransactionData>();
+		static readonly ConcurrentDictionary<int, UcmTransactionChangeAudit> UcmTransactionChangeAudits = new ConcurrentDictionary<int, UcmTransactionChangeAudit>();
+		static readonly ConcurrentDictionary<int, UcmNote> UcmNotes = new ConcurrentDictionary<int, UcmNote>();
+		static readonly ConcurrentDictionary<int, ReconciliationItem> ReconciliationItems = new ConcurrentDictionary<int, ReconciliationItem>();
+		static readonly ConcurrentDictionary<int, DailyReportHeader> ReportHeaders = new ConcurrentDictionary<int, DailyReportHeader>();
+		static readonly ConcurrentDictionary<int, TransactionReturnReasonType> TransactionReturnReasonTypes = new ConcurrentDictionary<int, TransactionReturnReasonType>();
+		static readonly ConcurrentDictionary<int, TransactionStatusType> TransactionStatusTypes = new ConcurrentDictionary<int, TransactionStatusType>();
+		static readonly ConcurrentDictionary<int, TransactionFinanceStatusType> TransactionFinanceStatusTypes = new ConcurrentDictionary<int, TransactionFinanceStatusType>();
+		static readonly ConcurrentDictionary<int, Remittance> Remittances = new ConcurrentDictionary<int, Remittance>();
+		static readonly ConcurrentDictionary<int, ReconciliationItemGroup> ReconciliationItemGroups = new ConcurrentDictionary<int, ReconciliationItemGroup>();
+		static readonly ConcurrentDictionary<int, SplitTransactionData> SplitTransactions = new ConcurrentDictionary<int, SplitTransactionData>();
+		static readonly ConcurrentDictionary<int, RemittanceDetail> RemittanceDetails = new ConcurrentDictionary<int, RemittanceDetail>();
+		static readonly ConcurrentDictionary<int, PotentialUcmMatches> PotentialUcmMatch = new ConcurrentDictionary<int, PotentialUcmMatches>();
+		static readonly ConcurrentDictionary<int, PotentialDebt> PotentialDebtTrans = new ConcurrentDictionary<int, PotentialDebt>();
+		static readonly ConcurrentDictionary<int, WorkflowGroupAuditComment> WorflowGroupAuditComment = new ConcurrentDictionary<int, WorkflowGroupAuditComment>();
+
+        static Boolean dataFlag;
+
+        /// <summary>CreateUcmRemittanceDetails
+		/// Reset all the static dictionaries after every test is run
+		/// </summary>
+		public void Reset()
+		{
+			var dbs = this.GetType().GetFields(BindingFlags.NonPublic | BindingFlags.Static)
+																															.Where(f => f.FieldType.IsGenericType)
+																															.Where(p => p.FieldType.GetGenericTypeDefinition().Name == "ConcurrentDictionary`2")
+																															.Select(s => s.GetValue(this));
+
+			foreach (var db in dbs)
+			{
+				((IDictionary)db).Clear();
+			}
+		}
+		/// <summary>
+		/// Adds each object contained in the array classificationTypeData verifying it doesn't exist in the collection.
+		/// </summary>
+		/// <param name="classificationTypeData">Array of ClassificationTypeData objects</param>
+		public void SaveClassificationTypeData(ClassificationTypeData[] classificationTypeData)
+		{
+			if (classificationTypeData.Any(c => c.ClassificationTypeId != 0))
+			{
+				throw new Exception("Database assigns IDs during Save() method");
+			}
+			for (int i = 0; i < classificationTypeData.Length; i++)
+			{
+				classificationTypeData[i].ClassificationTypeId = (byte)(ClassificationTypes.Count + 1);
+				if (!ClassificationTypes.TryAdd(classificationTypeData[i].ClassificationTypeId, classificationTypeData[i]))
+				{
+					throw new Exception("Unable to add classification to database");
+				}
+			}
+		}
+
+		/// <summary>
+		/// It save the reconciliation day passed like a parameter.
+		/// </summary>
+		/// <param name="day">ReconciliationDayData</param>
+		/// <returns>It returns the ReconciliationDayDataID</returns>
+		public int SaveReconciliationDay(ReconciliationDayData day)
+		{
+			if (day.ReconciliationDayID != 0)
+			{
+				throw new Exception("Database assigns IDs during Save() method");
+			}
+
+			day.ReconciliationDayID = ReconciliationDays.Count + 1;
+			if (!ReconciliationDays.TryAdd(day.ReconciliationDayID, day))
+			{
+				throw new Exception("Unable to add reconciliation day to database");
+			}
+
+			return day.ReconciliationDayID;
+		}
+
+		public void SaveRemittanceDetail(RemittanceDetail remittanceDetail)
+		{
+			if (remittanceDetail.RemittanceTransactionID != 0)
+			{
+				throw new Exception("Database assigns IDs during Save() method");
+			}
+
+			remittanceDetail.RemittanceTransactionID = RemittanceDetails.Count + 1;
+			if (!RemittanceDetails.TryAdd(remittanceDetail.RemittanceId, remittanceDetail))
+			{
+				throw new Exception("Unable to add remittance details to database");
+			}
+		}
+
+		public void SaveWorkFlowGroupComment(WorkflowGroupAuditComment workflowgroupauditcomment)
+		{
+			var id = WorflowGroupAuditComment.Count + 1;
+			if (!WorflowGroupAuditComment.TryAdd(id, workflowgroupauditcomment))
+			{
+				throw new Exception("Unable to add workflowgroupauditcomment details to database");
+			}
+		}
+		/// <summary>
+		/// Saves the ReconciliationDayBalanceData in the tests database.
+		/// </summary>
+		/// <param name="data">ReconciliationDayBalanceData</param>
+		public void SaveReconciliationDayBalanceData(ReconciliationDayBalanceData data)
+		{
+			if (!ReconciliationDayBalances.TryAdd(ReconciliationDayBalances.Count + 1, data))
+			{
+				throw new Exception("Unable to add reconciliation day balance data day to database");
+			}
+		}
+
+		/// <summary>
+		/// It saves an array of PostedPaymentStatusData in the test database
+		/// </summary>
+		/// <param name="postedPaymentData">Array of PostedPaymentStatusData objects</param>
+		public void SavePostedPaymentStatusData(PostedPaymentStatusData[] postedPaymentData)
+		{
+			if (postedPaymentData.Any(c => c.PaymentID != 0))
+			{
+				throw new Exception("Database assigns IDs during Save() method");
+			}
+			for (int i = 0; i < postedPaymentData.Length; i++)
+			{
+				postedPaymentData[i].PaymentID = (byte)(PostedPaymentStatuses.Count + 1);
+				if (!PostedPaymentStatuses.TryAdd(postedPaymentData[i].PaymentID, postedPaymentData[i]))
+				{
+					throw new Exception("Unable to add classification to database");
+				}
+			}
+		}
+
+		/// <summary>
+		/// Saves the object ReconciliationItemSummary in the test database
+		/// </summary>
+		/// <param name="summary">ReconciliationItemSummary object</param>
+		public void SaveReconciliationItemSummary(ReconciliationItemSummary summary)
+		{
+			if (!ReconciliationItemSummaries.TryAdd(ReconciliationItemSummaries.Count + 1, summary))
+			{
+				throw new Exception("Unable to add reconciliation item summary to database");
+			}
+		}
+
+		/// <summary>
+		/// Saves a PostedPaymentData object in the test database
+		/// </summary>
+		/// <param name="data">PostedPaymentData</param>
+		/// <returns>It returns the PaymentId saved</returns>
+		public int SavePostedPaymentData(PostedPaymentData data)
+		{
+			if (data.PaymentID != 0)
+			{
+				throw new Exception("Database assigns IDs during Save() method");
+			}
+
+			data.PaymentID = PostedPayments.Count + 1;
+			if (!PostedPayments.TryAdd(data.PaymentID, data))
+			{
+				throw new Exception("Unable to add posted payment data to database");
+			}
+
+			return data.PaymentID;
+		}
+
+		public void SaveBankTransactionTransferRelationship(BankTransactionTransferRelationship relationship)
+		{
+			if (!BankTransactionTransferRelationshps.TryAdd(BankTransactionTransferRelationshps.Count + 1, relationship))
+			{
+				throw new Exception("Unable to add BankTransaction Transfer Relationships to database");
+			}
+
+		}
+		/// <summary>
+		/// We are not using this
+		/// </summary>
+		/// <param name="filters"></param>
+		/// <param name="where"></param>
+		/// <returns></returns>
+		public string BuildFilters(DataFilter[] filters, string where)
+		{
+			throw new NotImplementedException();
+		}
+
+		/// <summary>
+		/// It gets all the back transaction statement balances
+		/// </summary>
+		/// <param name="reconciliationFor">Reconciliation day date</param>
+		/// <returns>It returns the ReconciliationDayBalanceData for a specific reconciliation day</returns>
+		public ReconciliationDayBalanceData GetAllBankTransactionStatementBalances(DateTime reconciliationFor)
+		{
+			return ReconciliationDayBalances.Values.FirstOrDefault();
+		}
+
+
+		/// <summary>
+		/// It gets a list of remittance details
+		/// </summary>
+		/// <param name="statementId">Remittance id</param>
+		public List<UcmRemittanceDetail> GetListRemittanceDetail(int id)
+		{
+			//getting the bank transaction ids from the remittance details dictionary
+			var bankTransactionIds = RemittanceDetails.Values.Where(rd => rd.RemittanceId == id)
+											.SelectMany(rd => rd.BankTransactionIds)
+											.ToArray();
+
+			//getting the bank transactions based on the ids above
+			var bts = BankTransactions.Values.Where(b => bankTransactionIds.Contains(b.BankTransactionID)).ToList();
+
+			var results = new List<UcmRemittanceDetail>();
+
+			foreach (var bt in bts)
+			{
+				var ucmForBt = UcmTransactions.Values.FirstOrDefault(u => u.BankTransactionID == bt.BankTransactionID);
+
+				results.Add(new UcmRemittanceDetail
+				{
+					RemittanceID = id,
+					BankTransactionID = bt.BankTransactionID,
+					Amount = bt.Amount,
+					BankCode = bt.BankCode,
+					ClassificationTypeID = bt.ClassificationTypeID,
+					Creditor = bt.Creditor,
+					Description = bt.Description,
+					StatementID = bt.StatementID,
+					TransactionDate = bt.TransactionDate,
+					TransactionStatusTypeID = ucmForBt != null ? ucmForBt.TransactionStatusTypeID : null,
+					TransactionReturnReasonTypeID = (byte)TransactionReturnReasonType.Unknown
+				});
+			}
+
+			return results;
+
+		}
+
+		public BankTransactionData GetBankTransaction(int bankTransactionID)
+		{
+			return BankTransactions.Values.FirstOrDefault(t => t.BankTransactionID == bankTransactionID);
+
+		}
+
+		public List<BankTransactionData> GetBankTransactions()
+		{
+			return BankTransactions.Values.ToList();
+
+		}
+
+		/// <summary>
+		/// Returns the bank transaction barclays matched total
+		/// </summary>
+		/// <param name="reconciliationFor">Reconciliation day date</param>
+		/// <returns>It returns a decimal with the bank transaction barclays matched total</returns>
+		public decimal GetBankTransactionBarclaysMatchedTotal(DateTime reconciliationFor)
+		{
+			return 10.00m;
+		}
+
+		/// <summary>
+		/// Returns the bank transaction santander matched total 
+		/// </summary>
+		/// <param name="reconciliationFor">Reconciliation day date</param>
+		/// <returns>It returns a decimal with the bank transaction santander matched total</returns>
+		public decimal GetBankTransactionSantanderMatchedTotal(DateTime reconciliationFor)
+		{
+			return 12.00m;
+		}
+
+		public List<BankTransactionData> GetBankTransactionsForExactReconciliation(int ClassificationID, DateTime ReconciliationDate)
+		{
+			var result = BankTransactions.Values.Where(b => b.TransactionDate <= ReconciliationDate)
+																																															.Where(b => b.ClassificationTypeID == ClassificationID)
+																																															.Where(b => b.ItemStatusTypeID < 2)
+																																															.Where(b =>
+																																																			!ReconciliationItemRelationships.Values.Select(i => i.BankTransactionId).Contains(b.BankTransactionID)
+																																																			)
+																																															.OrderBy(o => new { o.Amount, o.ChequeNumber, o.BankReference, o.Description }).ToList();
+
+			return result;
+		}
+
+		public List<BankTransactionData> GetBankTransactionsForPartialReconciliation(int ClassificationID, DateTime ReconciliationDate)
+		{
+			var results = BankTransactions.Values.Where(b => !(
+			(
+							(
+											(((DateTime?)b.TransactionDate == (DateTime?)null) && b.TransactionDate <= ReconciliationDate) &&
+											((int)b.ClassificationTypeID == ClassificationID)
+							)
+							&&
+											(int?)b.ItemStatusTypeID > (int?)2 && !(ReconciliationItemRelationships.Values.Where(r1 =>
+															(
+																			r1.BankTransactionId == (int?)b.BankTransactionID &&
+																			ReconciliationItemRelationships.Values
+																			.Where(r2 => r2.BankTransactionId != r1.BankTransactionId)
+																			.GroupBy(r2 => new { ItemID = r2.ReconciliationItemId })
+																			.Where(g => (g.Count(p => (p.BankTransactionId != null)) > 1))
+																			.Select(g => new { ItemID = g.Key.ItemID })
+																			.Contains(new { ItemID = r1.ReconciliationItemId })
+															)
+											).Select(r1 => new { Column1 = 1 }).Single() != null)
+							)
+			))
+			 .OrderBy(b => b.ChequeNumber)
+			 .ThenBy(b => b.BankReference)
+			 .ThenBy(b => b.Description)
+			 .ThenBy(b => b.Amount)
+			 .Select(
+											b =>
+															 new BankTransactionData
+															 {
+																 BankTransactionID = b.BankTransactionID,
+																 TransactionDate = b.TransactionDate,
+																 Amount = b.Amount,
+																 BankCode = b.BankCode,
+																 ChequeNumber = b.ChequeNumber,
+																 Description = b.Description,
+																 ClassificationTypeID = b.ClassificationTypeID,
+																 Comment = b.Comment,
+																 BankReference = b.BankReference,
+																 StatementID = b.StatementID,
+																 ItemStatusTypeID = b.ItemStatusTypeID,
+																 AmountRemaining = b.AmountRemaining,
+															 }).ToList();
+
+			return results;
+		}
+
+		/// <summary>
+		/// It gets a list of classification type data
+		/// </summary>
+		/// <returns>Returns a list of ClassificationTypeData</returns>
+		public List<ClassificationTypeData> GetClassificationTypes()
+		{
+			return ClassificationTypes.Values.ToList();
+		}
+
+		/// <summary>
+		/// Resturns a list of classification types
+		/// </summary>
+		/// <returns>Returns a list of EnumColumnEnumItem objects</returns>
+		public List<EnumColumnEnumItem> GetClassificationTypesAsEnumColumnEnumItem()
+		{
+			return new[] {
+								new EnumColumnEnumItem { Description = "Desc1", Value = 1 },
+								new EnumColumnEnumItem { Description = "Desc2", Value = 2 },
+								new EnumColumnEnumItem { Description = "Desc3", Value = 3 }
+						}.ToList();
+		}
+
+		/// <summary>
+		/// It gets the current reconciliation day
+		/// </summary>
+		/// <returns>Returns a ReconciliationDayData object</returns>
+		public ReconciliationDayData GetCurrentReconciliationDay()
+		{
+			var day = ReconciliationDays.Values
+					.Where(r => r.ReconciliationFor <= DateTime.Now)
+					.Where(r => r.ReconciliationFor >= DateTime.Now.AddMinutes(-10)).FirstOrDefault();
+
+			return day;
+		}
+
+		public DailyReportHeader GetDailyReport(int reportId)
+		{
+			return ReportHeaders.Values.FirstOrDefault(r => r.ReportID == reportId);
+		}
+
+		/// <summary>
+		/// It gets a list of item status types
+		/// </summary>
+		/// <returns>Returns a list of EnumColumnEnumItem</returns>
+		public List<EnumColumnEnumItem> GetItemStatusTypesAsEnumColumnEnumItem()
+		{
+			return new[] {
+								new EnumColumnEnumItem { Description = "Desc1", Value = 1 },
+								new EnumColumnEnumItem { Description = "Desc2", Value = 2 },
+								new EnumColumnEnumItem { Description = "Desc3", Value = 3 }
+						}.ToList();
+		}
+
+		public List<BankTransactionData> GetNewBankTransactionsForReconciliation(int ClassificationID, DateTime ReconciliationDate)
+		{
+			return BankTransactions.Values
+							.Where(b => b.ClassificationTypeID == ClassificationID)
+							.Where(b => b.TransactionDate == ReconciliationDate).ToList();
+		}
+
+		public List<PostedPaymentData> GetNewPostedPaymentsForReconciliation(int ClassificationID, DateTime ReconciliationDate)
+		{
+			return PostedPayments.Values
+							.Where(b => b.ClassificationTypeID == (byte)ClassificationID)
+							.Where(b => b.PostedDate == ReconciliationDate).ToList();
+		}
+
+		public List<ReconciliationItemGroup> GetNewReconciliationItemGroups(int reconciliationDayId)
+		{
+			return ReconciliationItemGroups.Values.Where(r => r.ReconciliationDayID == reconciliationDayId).ToList();
+		}
+
+		/// <summary>
+		/// It gets a Posted Payment object for a specific Id 
+		/// </summary>
+		/// <param name="postedID">int</param>
+		/// <returns>Returns a PostedPaymentData object</returns>
+		public PostedPaymentData GetPostedPayment(int postedID)
+		{
+			return PostedPayments.Values.FirstOrDefault(p => p.PaymentID == postedID);
+		}
+
+		/// <summary>
+		/// It returns the posted payment DMS voided client refund total
+		/// </summary>
+		/// <param name="reconciliationFor">Reconciliation day date</param>
+		/// <returns>Returns a decimal with the PostedPaymentDMSVoidedClientRefundTotal</returns>
+		public decimal GetPostedPaymentsDMSVoidedClientRefundTotal(DateTime reconciliationFor)
+		{
+			return 11.60m;
+		}
+
+		/// <summary>
+		/// It gets the value for Posted payment DMS Voided Disbursement Total
+		/// </summary>
+		/// <param name="reconciliationFor">Reconciliation day date</param>
+		/// <returns></returns>
+		public decimal GetPostedPaymentsDMSVoidedDisbursementTotal(DateTime reconciliationFor)
+		{
+			return 13.50m;
+		}
+
+		public List<PostedPaymentData> GetPostedPaymentsForExactReconciliation(int ClassificationID, DateTime ReconciliationDate)
+		{
+			var result = PostedPayments.Values.Where(p => p.PostedDate <= ReconciliationDate)
+																															.Where(p => p.ClassificationTypeID == ClassificationID)
+																															.Where(p => p.ItemStatusTypeID < 2)
+																															.Where(p =>
+																																			!ReconciliationItemRelationships.Values.Select(i => i.PaymentId).Contains(p.PaymentID)
+																																			)
+																															.OrderBy(o => new { o.Amount, o.ChequeNumber, o.CreditorReference, o.Description }).ToList();
+
+			return result;
+		}
+
+		public List<PostedPaymentData> GetPostedPaymentsForPartialReconciliation(int ClassificationID, DateTime ReconciliationDate)
+		{
+			var results = PostedPayments.Values.Where(p => !(
+							(
+											(
+															(((DateTime?)p.PostedDate == (DateTime?)null) && p.PostedDate <= ReconciliationDate) &&
+															((int)p.ClassificationTypeID == ClassificationID)
+											)
+											&&
+															(int?)p.ItemStatusTypeID > (int?)2 && !(ReconciliationItemRelationships.Values.Where(r1 =>
+																			(
+																							r1.PaymentId == (int?)p.PaymentID &&
+																							ReconciliationItemRelationships.Values
+																							.Where(r2 => r2.BankTransactionId != r1.BankTransactionId)
+																							.GroupBy(r2 => new { ItemID = r2.ReconciliationItemId })
+																							.Where(g => (g.Count(b => (p.PaymentID != null)) > 1))
+																							.Select(g => new { ItemID = g.Key.ItemID })
+																							.Contains(new { ItemID = r1.ReconciliationItemId })
+																			)
+															).Select(r1 => new { Column1 = 1 }).Single() != null)
+											)
+							))
+							.OrderBy(p => p.ChequeNumber)
+							.ThenBy(p => p.CreditorReference)
+							.ThenBy(p => p.Description)
+							.ThenBy(p => p.Amount)
+							.Select(
+											p =>
+																			new PostedPaymentData
+																			{
+																				PaymentID = p.PaymentID,
+																				PostedDate = p.PostedDate,
+																				BatchID = p.BatchID,
+																				Amount = p.Amount,
+																				CreditorName = p.CreditorName,
+																				ChequeNumber = p.ChequeNumber,
+																				Description = p.Description,
+																				ClassificationTypeID = p.ClassificationTypeID,
+																				Comment = p.Comment,
+																				CreditorReference = p.CreditorReference,
+																				ItemStatusTypeID = p.ItemStatusTypeID,
+																				AmountRemaining = p.AmountRemaining,
+																			}).ToList();
+
+			return results;
+		}
+
+		/// <summary>
+		/// It gets the reconciliation day data for an specific day
+		/// </summary>
+		/// <param name="reconciliationFor">Reconciliation day date</param>
+		/// <returns>Returns a ReonciliationDayData object</returns>
+		public ReconciliationDayData GetReconciliationDay(DateTime reconciliationFor)
+		{
+			return ReconciliationDays.Values.FirstOrDefault(r => r.ReconciliationFor == reconciliationFor);
+		}
+
+		/// <summary>
+		/// It gets the reconciliation day data for an specific id
+		/// </summary>
+		/// <param name="reconciliationDayId">Reconciliation day id</param>
+		/// <returns>Returns a Reconciliation Day Data object</returns>
+		public ReconciliationDayData GetReconciliationDay(int reconciliationDayId)
+		{
+			return ReconciliationDays.Values.FirstOrDefault(r => r.ReconciliationDayID == reconciliationDayId);
+		}
+
+		/// <summary>
+		/// It gets the Reconciliation day statistics for a specific reconciliation day
+		/// </summary>
+		/// <param name="reconciliationFor">Reconciliation day date </param>
+		/// <returns>Returns a ReconciliationDayStatistics object</returns>
+		public ReconciliationDayStatistics GetReconciliationDayStatistics(DateTime reconciliationFor)
+		{
+			var result = new ReconciliationDayStatistics
+			{
+				AreSplitItemsPendingApproval = false,
+				PartiallyMatchedBankTransactionsCount = 2,
+				PartiallyMatchedPostedPaymentsCount = 3,
+				UnmatchedBankTransactionsCount = 1,
+				UnmatchedPostedPaymentsCount = 0
+			};
+			return reconciliationFor - DateTime.Now < new TimeSpan(0, 0, 5, 0) ? result : null;
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="bankTransactionId"></param>
+		/// <returns></returns>
+		public ReconciliationItem GetReconciliationItemForBankTransactionId(int bankTransactionId)
+		{
+			var reconciliationItemIds = ReconciliationItemRelationships.Values
+																																											.Where(s => s.BankTransactionId == bankTransactionId)
+																																											.Select(s => s.ReconciliationItemId);
+
+			return ReconciliationItems.Values.FirstOrDefault(s => reconciliationItemIds.Contains(s.ReconciliationItemId));
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="postedPaymentId"></param>
+		/// <returns></returns>
+		public ReconciliationItem GetReconciliationItemForPostedPaymentId(int postedPaymentId)
+		{
+			var rir = ReconciliationItemRelationships.Values
+																																																																																			.Where(r => r.PaymentId == postedPaymentId)
+																																																																																			.Select(r => r.ReconciliationItemId);
+
+			var item = ReconciliationItems.Values.FirstOrDefault(r => rir.Contains(r.ReconciliationItemId));
+
+			return item;
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="ClassificationID"></param>
+		/// <param name="ReconciliationDayID"></param>
+		/// <returns></returns>
+		public ReconciliationItemGroup GetReconciliationItemGroupByClassification(byte ClassificationID, int ReconciliationDayID)
+		{
+			return ReconciliationItemGroups.Values
+							.Where(g => g.ClassificationID == ClassificationID)
+							.Where(g => g.ReconciliationDayID == ReconciliationDayID).FirstOrDefault();
+		}
+
+		/// <summary>
+		/// It gets the Reconciliation Item Summary for a specific bank transaction id
+		/// </summary>
+		/// <param name="bankTransactionId">bank transaction id</param>
+		/// <returns>Returns a ReconciliationItemSummary object</returns>
+		public ReconciliationItemSummary GetReconciliationItemSummaryForBankTransaction(int bankTransactionId)
+		{
+			var item = ReconciliationItemRelationships.Values.FirstOrDefault(i => i.BankTransactionId == bankTransactionId);
+			if (item != null)
+			{
+				return ReconciliationItemSummaries.Values.FirstOrDefault(r => r.ReconciliationItem.ReconciliationItemId == item.ReconciliationItemId);
+			}
+			return null;
+		}
+
+		/// <summary>
+		/// It gets the Reconciliation Item Summary for a specific posted payment id
+		/// </summary>
+		/// <param name="postedPaymentId">Posted payment id</param>
+		/// <returns>Returns a ReconciliationItemSummary object</returns>
+		public ReconciliationItemSummary GetReconciliationItemSummaryForPostedPayment(int postedPaymentId)
+		{
+			var item = ReconciliationItemRelationships.Values.FirstOrDefault(i => i.PaymentId == postedPaymentId);
+			if (item != null)
+			{
+				return ReconciliationItemSummaries.Values.FirstOrDefault(r => r.ReconciliationItem.ReconciliationItemId == item.ReconciliationItemId);
+			}
+			return null;
+		}
+
+		/// <summary>
+		/// It gets a list of EnumColumnEnumItem objects
+		/// </summary>
+		/// <returns>Returns a list of EnumColumnEnumItem</returns>
+		public List<EnumColumnEnumItem> GetSplitRequestStatusTypeAsEnumColumnEnumItem()
+		{
+			return new[] {
+								new EnumColumnEnumItem { Description = "Desc1", Value = 1 },
+								new EnumColumnEnumItem { Description = "Desc2", Value = 2 },
+								new EnumColumnEnumItem { Description = "Desc3", Value = 3 }
+						}.ToList();
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="itemId"></param>
+		/// <returns></returns>
+		public SplitTransactionData GetSplitTransactionRequest(int itemId)
+		{
+			return SplitTransactions.Values.FirstOrDefault(s => s.SplitPaymentRequestID == itemId);
+		}
+
+		/// <summary>
+		/// It gets Statement data for a specific statement id
+		/// </summary>
+		/// <param name="statementId">Statement id</param>
+		/// <returns>Returns a StatementData object</returns>
+		public StatementData GetStatement(int statementId)
+		{
+			return Statements.Values.FirstOrDefault(s => s.StatementID == statementId);
+		}
+
+		/// <summary>
+		/// Gets a IEnumerables of StatementData for a reconciliation day id
+		/// </summary>
+		/// <param name="reconciliationDayId">Reconciliation day id</param>
+		/// <returns>Returns an IEnumerable of StatementData</returns>
+		public IEnumerable<StatementData> GetStatementsByReconciliationDay(int reconciliationDayId)
+		{
+			return Statements.Values.Where(r => r.ReconciliationDayID == reconciliationDayId);
+		}
+
+		/// <summary>
+		/// Verifies if a transaction is splittable
+		/// </summary>
+		/// <param name="transactionType">Split transaction type</param>
+		/// <param name="itemId">Transaction id</param>
+		/// <returns>It returns a boolean indicating if the item is splittable</returns>
+		public bool IsPendingSplit(SplitTransactionTypes transactionType, int itemId)
+		{
+			return Convert.ToBoolean(itemId % 2);
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="day"></param>
+		/// <param name="filters"></param>
+		/// <param name="skip"></param>
+		/// <param name="top"></param>
+		/// <param name="orderBy"></param>
+		/// <param name="orderByDirection"></param>
+		/// <returns></returns>
+		public QueryResults<BankTransactionStatusData> QueryBankTransactionsStatus(ReconciliationDayData day, DataFilter[] filters, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			var banktransactions = BankTransactions.Values.Where(b => b.TransactionDate == day.ReconciliationFor);
+
+			if (filters != null && filters.Any())
+			{
+				List<Func<BankTransactionData, bool>> wheres = BuildFilters<BankTransactionData>(filters);
+
+				foreach (var where in wheres)
+				{
+					banktransactions = banktransactions.Where(where).ToList();
+				}
+			}
+			var banktransactionStatus = banktransactions.Select(b => ToBankTransactionStatus(b));
+			return new QueryResults<BankTransactionStatusData>(banktransactionStatus.Count(), skip, top, banktransactionStatus, this);
+		}
+
+		public QueryResults<BankTransactionStatusDataLookup> QueryBankTransactionsStatusLookup(ReconciliationDayData day, int bankTransactionId, DataFilter[] filters, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			var banktransactions = BankTransactions.Values
+							.Where(b => b.TransactionDate == day.ReconciliationFor)
+							.Where(b => b.BankTransactionID == bankTransactionId);
+
+			if (filters != null && filters.Any())
+			{
+				List<Func<BankTransactionData, bool>> wheres = BuildFilters<BankTransactionData>(filters);
+
+				foreach (var where in wheres)
+				{
+					banktransactions = banktransactions.Where(where).ToList();
+				}
+			}
+			var banktransactionStatus = banktransactions.Select(b => ToBankTransactionStatus(b));
+			return new QueryResults<BankTransactionStatusDataLookup>(banktransactionStatus.Count(), skip, top, null, this);
+		}
+
+		public QueryResults<DailyReportHeader> QueryDailyReportHeader(DataFilter[] filters, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			var reports = ReportHeaders.Values;
+
+			if (filters != null && filters.Any())
+			{
+				List<Func<DailyReportHeader, bool>> wheres = BuildFilters<DailyReportHeader>(filters);
+
+				foreach (var where in wheres)
+				{
+					reports = reports.Where(where).ToList();
+				}
+			}
+
+			return new QueryResults<DailyReportHeader>(reports.Count(), skip, top, reports, this);
+		}
+
+		public QueryResults<BankTransactionData> QueryHistoricUnmatchedBankTransactions(int reportID, int classificationID, DataFilter[] filters, HistoricQueryType queryType, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			throw new NotImplementedException();
+		}
+
+		public QueryResults<BankTransactionStatusT2Data> QueryT2BankTransactionsStatus(ReconciliationDayData day)
+		{
+			throw new NotImplementedException();
+		}
+
+		public QueryResults<PostedPaymentData> QueryHistoricUnmatchedPostedPayments(int reportID, int classificationID, DataFilter[] filters, HistoricQueryType queryType, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			throw new NotImplementedException();
+		}
+
+		public QueryResults<BankTransactionData> QueryMatchedBarclays(int reportID, DataFilter[] filters, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			throw new NotImplementedException();
+		}
+
+		public QueryResults<PostedPaymentData> QueryMatchedPostedPayments(int reportID, int classificationID, DataFilter[] filters, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			throw new NotImplementedException();
+		}
+
+		public QueryResults<BankTransactionData> QueryMatchedSantander(int reportID, DataFilter[] filters, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			throw new NotImplementedException();
+		}
+
+		public QueryResults<BankTransactionData> QueryNewUnmatchedBankTransactions(int reportID, int classificationID, DataFilter[] filters, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			throw new NotImplementedException();
+		}
+
+		public QueryResults<PostedPaymentData> QueryNewUnmatchedPostedPayments(int reportID, int classificationID, DataFilter[] filters, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			throw new NotImplementedException();
+		}
+
+		/// <summary>
+		/// Gets a query results of Posted Payments Status Data
+		/// </summary>
+		/// <param name="filters">Array containing filters to apply to the query</param>
+		/// <param name="skip">Number of items to skip</param>
+		/// <param name="top">Top items to select</param>
+		/// <param name="orderBy">Indicates the item which the result will be ordered by</param>
+		/// <param name="orderByDirection">Indicates the direction for the order of the item selected previously ASC or DESC</param>
+		/// <returns>Returns a QueryResult of PostedPaymentStatusData</returns>
+		public QueryResults<PostedPaymentStatusData> QueryPostedPaymentsStatus(DataFilter[] filters, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			var results = PostedPaymentStatuses.Values.Skip(skip).Take(top);
+			return new QueryResults<PostedPaymentStatusData>(results.Count(), skip, top, results, this);
+		}
+
+		/// <summary>
+		/// Gets a query results of Posted Payment Status Data
+		/// </summary>
+		/// <param name="day">Reconciliation day data</param>
+		/// <param name="filters">Array containing filters to apply to the query</param>
+		/// <param name="skip">Number of items to skip</param>
+		/// <param name="top">Top items to select</param>
+		/// <param name="orderBy">Indicates the item which the result will be ordered by</param>
+		/// <param name="orderByDirection">Indicates the direction for the order of the item selected previously ASC or DESC</param>
+		/// <returns>Returns a QueryResult of PostedPaymentStatusData</returns>
+		public QueryResults<PostedPaymentStatusData> QueryPostedPaymentsStatus(ReconciliationDayData day, DataFilter[] filters, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			var result = PostedPaymentStatuses.Values
+																			.Skip(skip)
+																			.Take(top)
+																			.Where(p => p.PostedDate >= day.ReconciliationFor);
+
+			return new QueryResults<PostedPaymentStatusData>(result.Count(), skip, top, result, this);
+		}
+
+		/// <summary>
+		/// Gets a query results of Posted Payment Status Data for a specific ReconciliationDayData and postedPaymentId
+		/// </summary>
+		/// <param name="day">Reconciliation day data</param>
+		/// <param name="postedPaymentId">Posted Payment id int</param>
+		/// <param name="filters">Array containing filters to apply to the query</param>
+		/// <param name="skip">Number of items to skip</param>
+		/// <param name="top">Top items to select</param>
+		/// <param name="orderBy">Indicates the item which the result will be ordered by</param>
+		/// <param name="orderByDirection">Indicates the direction for the order of the item selected previously ASC or DESC</param>
+		/// <returns>Returns a QueryResults of PostedPaymentStatusData</returns>
+		public QueryResults<PostedPaymentStatusDataLookup> QueryPostedPaymentsStatusLookup(ReconciliationDayData day, int postedPaymentId, DataFilter[] filters, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			var result = PostedPaymentStatuses.Values
+																			.Skip(skip)
+																			.Take(top)
+																			.Where(p => p.PaymentID == postedPaymentId)
+																			.Where(p => p.PostedDate >= day.ReconciliationFor);
+
+			return new QueryResults<PostedPaymentStatusDataLookup>(result.Count(), skip, top, null, this);
+		}
+
+		public QueryResults<BankTransactionData> QueryPreviousUnmatchedBankTransactions(int reportID, int classificationID, DataFilter[] filters, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			throw new NotImplementedException();
+		}
+
+		public QueryResults<PostedPaymentData> QueryPreviousUnmatchedPostedPayments(int reportID, int classificationID, DataFilter[] filters, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			throw new NotImplementedException();
+		}
+
+		public QueryResults<SplitTransactionData> QuerySplitTransactionRequests(DataFilter[] filters, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			throw new NotImplementedException();
+		}
+
+		/// <summary>
+		/// It gets a list of unmatched items for a specific ReconciliationDayData object
+		/// </summary>
+		/// <param name="day">Reconciliation day data object</param>
+		/// <returns>It returns a list of UnmatchedItem</returns>
+		public List<UnmatchedItem> SelectUnmatchedHistoric(ReconciliationDayData day)
+		{
+			return new List<UnmatchedItem>
+						{
+								new UnmatchedItem
+								{
+										Balance = 5.00m,
+										BarclaysValue = 12.00m,
+										Classification = "Transcash",
+										ClassificationTypeId = 7,
+										DMSValue = 10.23m
+								}
+						};
+		}
+
+		/// <summary>
+		/// It gets a list of unmatched items for a specific ReconciliationDayData object
+		/// </summary>
+		/// <param name="day">Reconciliation day data object</param>
+		/// <returns>It returns a list of UnmatchedItem</returns>
+		public List<UnmatchedItem> SelectUnmatchedOutsideTimeframe(ReconciliationDayData day)
+		{
+			return new List<UnmatchedItem>
+						{
+								new UnmatchedItem
+								{
+										Balance = 15.00m,
+										BarclaysValue = 9.00m,
+										Classification = "PaymentCard",
+										ClassificationTypeId = 8,
+										DMSValue = 5.12m
+								}
+						};
+		}
+
+		/// <summary>
+		/// It gets a list of unmatched items for a specific ReconciliationDayData object
+		/// </summary>
+		/// <param name="day">Reconciliation day data object</param>
+		/// <returns>It returns a list of UnmatchedItem</returns>
+		public List<UnmatchedItem> SelectUnmatchedWithinTimeframe(ReconciliationDayData day)
+		{
+			return new List<UnmatchedItem>
+						{
+								new UnmatchedItem
+								{
+										Balance = 46.00m,
+										BarclaysValue = 28.00m,
+										Classification = "Transcash",
+										ClassificationTypeId = 7,
+										DMSValue = 25.87m
+								}
+						};
+		}
+
+		public int AuthoriseSplitTransactionRequest(SplitTransactionData item, string authoriser, ItemStatusType itemStatusTypeID, SplitRequestStatusType requestType)
+		{
+			throw new NotImplementedException();
+		}
+
+		/// <summary>
+		/// Generates a DailyReportHeader based on the report passed like a parameter
+		/// </summary>
+		/// <param name="report">DailyReportHeader</param>
+		/// <returns>Returns a DailyReportheader object</returns>
+		public DailyReportHeader CreateDailyReport(DailyReportHeader report)
+		{
+			return report;
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="date"></param>
+		public void CreateHistoricalBankTransactions(DateTime date)
+		{
+			return;
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="date"></param>
+		public void CreateHistoricalPayments(DateTime date)
+		{
+			return;
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="item"></param>
+		/// <returns></returns>
+		public ReconciliationItem CreateReconciliationItem(ReconciliationItem item)
+		{
+			if (item.ReconciliationItemId != 0)
+			{
+				throw new Exception("Database assigns IDs during Save() method");
+			}
+
+			item.ReconciliationItemId = ReconciliationItems.Count + 1;
+
+			if (!ReconciliationItems.TryAdd(item.ReconciliationItemId, item))
+			{
+				throw new Exception("Unable to add classification to database");
+			}
+
+			return item;
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="group"></param>
+		/// <returns></returns>
+		public ReconciliationItemGroup CreateReconciliationItemGroup(ReconciliationItemGroup group)
+		{
+			if (group.ReconciliationGroupID != 0)
+			{
+				throw new Exception("Database assigns IDs during Save() method");
+			}
+
+			group.ReconciliationGroupID = ReconciliationItemGroups.Count + 1;
+
+			if (!ReconciliationItemGroups.TryAdd(group.ReconciliationGroupID, group))
+			{
+				throw new Exception("Unable to add classification to database");
+			}
+
+			return group;
+		}
+
+		/// <summary>
+		/// Adding a new <see cref="ReconciliationItemRelationship"/> to the concurrent dictionary
+		/// </summary>
+		/// <param name="link">ReconciliationItemRelationship object</param>
+		public void CreateReconciliationItemRelationship(ReconciliationItemRelationship link)
+		{
+			link.ReconciliationItemId = ReconciliationItemRelationships.Count + 1;
+			if (!ReconciliationItemRelationships.TryAdd(ReconciliationItemRelationships.Count + 1, link))
+			{
+				throw new Exception("Unable to add reconciliation item relationship to database");
+			}
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="link"></param>
+		public void UpdateOutstandingAmounts(ReconciliationItemRelationship link)
+		{
+			throw new NotImplementedException();
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="item"></param>
+		public void CreateSplitTransactionRequest(SplitTransactionData item)
+		{
+			if (item.SplitPaymentRequestID != 0)
+			{
+				throw new Exception("Database assigns IDs during Save() method");
+			}
+
+			item.SplitPaymentRequestID = SplitTransactions.Count + 1;
+
+			if (!SplitTransactions.TryAdd(item.SplitPaymentRequestID.Value, item))
+			{
+				throw new Exception("Unable to add classification to database");
+			}
+		}
+
+		/// <summary>
+		/// Generates a new <see cref="StatementData"/>
+		/// </summary>
+		/// <param name="statementData">The <see cref="StatementData"/> generated</param>
+		public void CreateStatement(StatementData statementData)
+		{
+			if (statementData.StatementID != 0)
+			{
+				throw new Exception("Database assigns IDs during Save() method");
+			}
+
+			statementData.StatementID = Statements.Count + 1;
+			if (!Statements.TryAdd(Statements.Count + 1, statementData))
+			{
+				throw new Exception("Unable to add StatementData to database");
+			}
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		public void DeletePendingSplitTransactionRequests()
+		{
+			return;
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="ItemID"></param>
+		public void DeleteReconciliationItem(int ItemID)
+		{
+			var itemToRemove = new ReconciliationItem();
+			ReconciliationItems.TryRemove(ItemID, out itemToRemove);
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="itemId"></param>
+		/// <param name="bankTransactionId"></param>
+		public void DeleteReconciliationItemRelationshipForBankTransaction(int itemId, int bankTransactionId, int? postedPaymentId)
+		{
+			var toRemove = new ReconciliationItemRelationship { BankTransactionId = bankTransactionId, PaymentId = postedPaymentId };
+			ReconciliationItemRelationships.TryRemove(itemId, out toRemove);
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="itemId"></param>
+		/// <param name="postedPaymentId"></param>
+		public void DeleteReconciliationItemRelationshipForPostedPayment(int itemId, int postedPaymentId, int? bankTransactionId)
+		{
+			var toRemove = new ReconciliationItemRelationship { PaymentId = postedPaymentId, BankTransactionId = bankTransactionId };
+			ReconciliationItemRelationships.TryRemove(itemId, out toRemove);
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="bankData"></param>
+		public void UpdateBankTransactionClassification(BankTransactionData bankData)
+		{
+			var existingValueToUpdate = BankTransactions.Values.First(s => s.BankTransactionID == bankData.BankTransactionID);
+			BankTransactions.TryUpdate(bankData.BankTransactionID, bankData, existingValueToUpdate);
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="postedPaymentData"></param>
+		public void UpdatePostedPaymentClassification(PostedPaymentData postedPaymentData)
+		{
+			var existingValueToUpdate = PostedPayments.Values.First(p => p.PaymentID == postedPaymentData.PaymentID);
+			PostedPayments.TryUpdate(postedPaymentData.PaymentID, postedPaymentData, existingValueToUpdate);
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="dayData"></param>
+		public void UpdateReconciliationDay(ReconciliationDayData dayData)
+		{
+			var existingValueToUpdate = ReconciliationDays.Values.First(r => r.ReconciliationDayID == dayData.ReconciliationDayID);
+			ReconciliationDays.TryUpdate(dayData.ReconciliationDayID, dayData, existingValueToUpdate);
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="dayData"></param>
+		public void UpdateReconciliationDayStatus(ReconciliationDayData dayData)
+		{
+			var existingValueToUpdate = ReconciliationDays.Values.First(r => r.ReconciliationDayID == dayData.ReconciliationDayID);
+			ReconciliationDays.TryUpdate(dayData.ReconciliationDayID, dayData, existingValueToUpdate);
+		}
+
+		/// <summary>
+		/// Updates an existing <see cref="StatementData"/> 
+		/// </summary>
+		/// <param name="statementData">The <see cref="StatementData"/> updated</param>
+		public void UpdateStatement(StatementData statementData)
+		{
+			var item = Statements.FirstOrDefault(s => s.Value.StatementID == statementData.StatementID);
+			if (item.Value != null)
+			{
+				Statements.TryUpdate(item.Key, statementData, item.Value);
+			}
+		}
+
+		/// <summary>
+		/// It returns the total of Barclays T2 Transactions for a specific day
+		/// </summary>
+		/// <param name="reconciliationFor"><see cref="DateTime"/>reconciliation date</param>
+		/// <returns><see cref="int"/>Total number of Barclays T2 Transactions</returns>
+		public int GetTotalBarclaysT2TransactionRecDay(string reconciliationFor)
+		{
+			var result = BankTransactions.Values
+							.Where(b => b.TransactionDate == DateTime.Parse(reconciliationFor) &&
+											b.ClassificationTypeID == 30).Count();
+
+			return result;
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="ucmTransList"></param>
+		public void CreateUCMTransactionBatch(List<UcmTransactionData> ucmTransList)
+		{
+			if (ucmTransList == null) return;
+
+			foreach (var ucmtrans in ucmTransList)
+			{
+
+				if (ucmtrans.UcmTransactionID != 0)
+				{
+					throw new Exception("Database assigns IDs during Save() method");
+				}
+
+				ucmtrans.UcmTransactionID = UcmTransactions.Count + 1;
+
+				if (!UcmTransactions.TryAdd(UcmTransactions.Count + 1, ucmtrans))
+				{
+					throw new Exception("Unable to add UCM Data to database");
+				}
+			}
+		}
+
+		public void CreatePotentialDebtBatch(List<PotentialDebt> potentialdebtList)
+		{
+			if (potentialdebtList == null) return;
+
+			foreach (var potdebt in potentialdebtList)
+			{
+
+				if (potdebt.ClientID != 0)
+				{
+					throw new Exception("Database assigns IDs during Save() method");
+				}
+
+				potdebt.ClientID = PotentialDebtTrans.Count + 1;
+
+				if (!PotentialDebtTrans.TryAdd(PotentialDebtTrans.Count + 1, potdebt))
+				{
+					throw new Exception("Unable to add Potential Debt Data to database");
+				}
+			}
+		}
+
+
+
+
+
+		/// <summary>
+		/// Saves a <see cref="UcmTransactionChangeAudit"/>
+		/// </summary>
+		/// <param name="audit">UcmTransactionChangeAudit</param> audit to create
+		public void CreateTransactionChangeAudit(UcmTransactionChangeAudit ucmAudit)
+		{
+			if (ucmAudit == null) return;
+
+			if (ucmAudit.AuditID != 0)
+			{
+				throw new Exception("Database assigns IDs during Save() method");
+			}
+
+			ucmAudit.AuditID = UcmTransactionChangeAudits.Count + 1;
+
+			if (!UcmTransactionChangeAudits.TryAdd(ucmAudit.AuditID, ucmAudit))
+			{
+				throw new Exception("Unable to add UCM Audit Data to database");
+			}
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="transactionList"></param>
+		public void CreateBankTransactionBatch(List<BankTransactionData> transactionList)
+		{
+			if (transactionList == null) return;
+
+			foreach (var trans in transactionList)
+			{
+
+				if (trans.BankTransactionID != 0)
+				{
+					throw new Exception("Database assigns IDs during Save() method");
+				}
+
+				trans.BankTransactionID = BankTransactions.Count + 1;
+
+				if (!BankTransactions.TryAdd(BankTransactions.Count + 1, trans))
+				{
+					throw new Exception("Unable to add Bank Transaction Data to database");
+				}
+			}
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="RemittanceList"></param>
+		public void CreateRemittance(List<Remittance> RemittanceList)
+		{
+			if (RemittanceList == null) return;
+
+			foreach (var Rem in RemittanceList)
+			{
+
+				if (Rem.RemittanceID != 0)
+				{
+					throw new Exception("Database assigns IDs during Save() method");
+				}
+
+				Rem.RemittanceID = Remittances.Count + 1;
+
+				if (!Remittances.TryAdd(Remittances.Count + 1, Rem))
+				{
+					throw new Exception("Unable to add Remittance Data to database");
+				}
+			}
+		}
+
+		/// <summary>
+		/// Convert BankTransactionData to BankTransactionStatusData
+		/// </summary>
+		/// <param name="data"></param>
+		/// <returns></returns>
+		public static BankTransactionStatusData ToBankTransactionStatus(BankTransactionData data)
+		{
+			return new BankTransactionStatusData
+			{
+				BankTransactionID = data.BankTransactionID,
+				TransactionDate = data.TransactionDate,
+				Amount = data.Amount,
+				AmountRemaining = data.AmountRemaining,
+				BankCode = data.BankCode,
+				ChequeNumber = data.ChequeNumber,
+				Description = data.Description,
+				ClassificationTypeID = data.ClassificationTypeID,
+				Comment = data.Comment,
+				BankReference = data.BankReference,
+				StatementID = data.StatementID.Value,
+				ItemStatusTypeID = data.ItemStatusTypeID
+			};
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="data"></param>
+		/// <returns></returns>
+		public static BankTransactionStatusT2Data ToBankTransactionT2Status(BankTransactionData data)
+		{
+			return new BankTransactionStatusT2Data
+			{
+				BankTransactionID = data.BankTransactionID,
+				TransactionDate = data.TransactionDate,
+				Amount = data.Amount,
+				Description = data.Description,
+				IsUcm = data.Ucm,
+				IsBankTransfer = data.IsTrust1
+			};
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="data"></param>
+		/// <returns></returns>
+		public static BankTransactionMinData ToBankTransactionMin(BankTransactionData data)
+		{
+			return new BankTransactionMinData
+			{
+				BankTransactionID = data.BankTransactionID,
+				TransactionDate = data.TransactionDate,
+				Amount = data.Amount,
+				Description = data.Description,
+			};
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="data"></param>
+		/// <returns></returns>
+		public static UcmTransactionData ToUCMTransactionData(UcmTransactionData data)
+		{
+			return new UcmTransactionData
+			{
+				UcmTransactionID = data.UcmTransactionID,
+				UcmReference = data.UcmReference,
+				Amount = data.Amount,
+				Creditor = data.Creditor,
+				TransactionReturnReasonTypeID = data.TransactionReturnReasonTypeID,
+				TransactionStatusTypeID = data.TransactionStatusTypeID,
+			};
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="filters"></param>
+		/// <param name="skip"></param>
+		/// <param name="top"></param>
+		/// <param name="orderBy"></param>
+		/// <param name="orderByDirection"></param>
+		/// <returns></returns>
+		public QueryResults<BankTransactionStatusData> QueryBankTransactionsStatus(DataFilter[] filters,
+																		int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			throw new NotImplementedException();
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="bankTrasactionIDs"></param>
+		public List<int> CreateUCMTransactions(int[] bankTrasactionIDs)
+		{
+			var ids = new List<int>();
+
+			if (bankTrasactionIDs == null)
+
+				SaveReconciliationDay(new ReconciliationDayData
+				{
+					ReconciliationFor = DateTime.Now
+				});
+
+			foreach (var id in bankTrasactionIDs)
+			{
+				var BankTrans = GetBankTransaction(id);
+
+				var newUcmTrans = new UcmTransactionData
+				{
+					UcmTransactionID = UcmTransactions.Count + 1,
+					UcmReference = "UCM" + UcmTransactions.Count + 1,
+					TransactionStatusTypeID = 1,
+					TransactionReturnReasonTypeID = 1,
+					Amount = BankTrans.Amount,
+					Description = BankTrans.Description,
+					TransactionReturnMethodTypeID = 1,
+					BankTransactionID = BankTrans.BankTransactionID
+				};
+				var ucmid = UcmTransactions.Count + 1;
+				if (!UcmTransactions.TryAdd(ucmid, newUcmTrans))
+				{
+					throw new Exception("Unable to add Bank Transaction Data to database");
+				}
+
+				ids.Add(ucmid);
+			}
+			return ids;
+
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="filters"></param>
+		/// <param name="skip"></param>
+		/// <param name="top"></param>
+		/// <param name="orderBy"></param>
+		/// <param name="orderByDirection"></param>
+		/// <returns></returns>
+		public QueryResults<BankTransactionStatusT2Data> QueryT2BankTransactionsStatus(DataFilter[] filters, int skip = 0,
+int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			var results = BankTransactions
+											.Values
+											.Skip(skip)
+											.Take(top == 0 ? BankTransactions.Count : top)
+											.Where(t => t.ClassificationTypeID == 30)
+											.Select(trans => ToBankTransactionT2Status(trans));
+
+			if (filters != null && filters.Any())
+			{
+				var wheres = BuildFilters<BankTransactionStatusT2Data>(filters);
+
+				foreach (var where in wheres)
+				{
+					results = results.Where(where).ToList();
+				}
+			}
+
+			return new QueryResults<BankTransactionStatusT2Data>(results.Count(), skip, top, results, this);
+		}
+
+		/// <summary>
+		/// Creates the relationship between a bank transaction t2 with bank transactions 
+		/// </summary>
+		/// <param name="bttr">Transfer for the mapped t1 and t2 transactions</param>
+		public void SaveTransferRelationship(BankTransactionTransferRelationship bttr)
+		{
+			if (!BankTransactionTransferRelationshps.TryAdd(BankTransactionTransferRelationshps.Count + 1, bttr))
+			{
+				throw new Exception("Unable to add BankTransaction Transfer Relationships to database");
+			}
+
+			BankTransactions.Values.FirstOrDefault(t => t.BankTransactionID == bttr.BankTransactionT2.BankTransactionID).IsTrust1 = true;
+		}
+
+		/// <summary>
+		/// Deletes the relationship between a bank transaction t2 with bank transactions
+		/// </summary>
+		/// <param name="id">Bank transaction ID</param>
+		public void DeleteTransferRelationship(int id)
+		{
+			var removed = new BankTransactionTransferRelationship();
+			BankTransactionTransferRelationshps.TryRemove(id, out removed);
+
+			var trans = GetBankTransaction(id);
+			trans.IsTrust1 = false;
+		}
+
+		/// <summary>
+		/// Get <see cref="BankTransactionT2Data"/> and calculate values for amount and amount remaining
+		/// </summary>
+		/// <param name="id">Bank transaction t2 Id</param>
+		/// <returns>The <see cref="BankTransactionT2Data"/> with calculated amounts and amounts remaining for bank transactions</returns>
+		public List<BankTransactionData> GetBankTransactionT2RelationshipData(int id)
+		{
+			var relationshipData = new List<BankTransactionData>();
+
+			var relatedT1Ids =
+															BankTransactionTransferRelationshps.Values.Where(b => b.BankTransactionT2.BankTransactionID == id)
+																							.SelectMany(s => s.BankTransactions).Select(c => c.BankTransactionID);
+
+			foreach (int banktransid in relatedT1Ids)
+			{
+				relationshipData.Add(BankTransactions.Values.FirstOrDefault(b => b.BankTransactionID == banktransid));
+			}
+
+			return !relationshipData.Any() ? null : relationshipData;
+		}
+
+		/// <summary>
+		/// Gets all the ucms <see cref="UcmTransactionData"/> 
+		/// </summary>
+		/// <param name="filters">An <see cref="Array"/> of <see cref="DataFilter"/> to filter the <see cref="UcmTransactionData"/>ucms</param>
+		/// <param name="skip">The number of results to skip before adding to the result set. Defaults to zero.</param>
+		/// <param name="top">The number of records to return.  Defaults to zero, which will return all records.</param>
+		/// <param name="orderBy">Column name to order the results by.  Defaults to null.</param>
+		/// <param name="orderByDirection">Direction with which to order the results. Defaults to null.</param>
+		/// <returns>QueryResults collection of ucms</returns>
+		public QueryResults<UcmTransactionData> GetUcmTransactionData(DataFilter[] filters, int classificationTypeID, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			var results = UcmTransactions.Values.AsEnumerable();
+
+			if (filters != null && filters.Any())
+			{
+
+				var wheres = BuildFilters<UcmTransactionData>(filters);
+
+				foreach (var where in wheres)
+				{
+					results = results.Where(where).ToList();
+				}
+			}
+
+			return new QueryResults<UcmTransactionData>(results.Count(), skip, top, results, this);
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="id"></param>
+		/// <returns></returns>
+		public UcmTransactionData GetUcmTransactionData(int id)
+		{
+			return UcmTransactions.Values.FirstOrDefault(u => u.UcmTransactionID == id);
+		}
+
+		/// <summary>
+		/// Gets the existing transaction return reason types in the database
+		/// </summary>
+		/// <returns>Returns <list type="EnumColumEnumItem"></list></returns>
+		public List<EnumColumnEnumItem> GetTransactionReturnReasonTypeAsEnumColumnEnumItem()
+		{
+			return TransactionReturnReasonTypes.Values.Select(e => new EnumColumnEnumItem
+			{
+				Description = e.ToString(),
+				Value = (int)e
+			}).ToList();
+		}
+
+		/// <summary>
+		/// Gets the existing transaction status types in the database
+		/// </summary>
+		/// <returns>Returns <list type="EnumColumEnumItem"></list></returns>
+		public List<EnumColumnEnumItem> GetTransactionStatusTypeAsEnumColumnEnumItem()
+		{
+			return TransactionStatusTypes.Values.Select(e => new EnumColumnEnumItem
+			{
+				Description = e.ToString(),
+				Value = (int)e
+			}).ToList();
+		}
+
+		/// <summary>
+		/// Gets the existing transaction finance status types in the database
+		/// </summary>
+		/// <returns>Returns <list type="EnumColumEnumItem"></list></returns>
+		public List<EnumColumnEnumItem> GetTransactionFinanceStatusTypeAsEnumColumnEnumItem()
+		{
+			return TransactionFinanceStatusTypes.Values.Select(e => new EnumColumnEnumItem
+			{
+				Description = e.ToString(),
+				Value = (int)e
+			}).ToList();
+		}
+
+		/// <summary>
+		/// Gets the notes relating to a UCM bank transaction
+		/// </summary>
+		/// <param name="id">UCM bank transaction id</param>
+		/// <returns><see cref="List{UcmNotes}"/>for UCM bank transaction</returns>
+		public List<UcmNote> GetUcmNotesForTransaction(int id)
+		{
+			return UcmNotes.Values.Where(n => n.UcmTransactionID == id).ToList();
+		}
+
+		/// <summary>
+		/// Gets all the bank Transactions <see cref="BankTransactionStatusData"/> 
+		/// </summary>
+		/// <param name="filters">An <see cref="Array"/> of <see cref="DataFilter"/> to filter the bank transaction data</param>
+		/// <param name="id">Bank transaction t2 ID</param>
+		/// <param name="skip">The number of results to skip before adding to the result set. Defaults to zero.</param>
+		/// <param name="top">The number of records to return.  Defaults to zero, which will return all records.</param>
+		/// <param name="orderBy">Column name to order the results by.  Defaults to null.</param>
+		/// <param name="orderByDirection">Direction with which to order the results.  Defaults to null.</param>
+		/// <exception cref="SqlException">All errors are returned back as SqlExceptions</exception>
+		/// <returns>QueryResults collection of bank transaction data</returns>
+		public QueryResults<BankTransactionMinData> QueryT1BankTransactionsStatus(DataFilter[] filters, int id, int skip = 0,
+										int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			var t2 = BankTransactions.Values.FirstOrDefault(b => b.BankTransactionID == id);
+
+			var results = BankTransactions.Values
+																																																																							.Where(b => b.ClassificationTypeID != 30)
+																																																																							.Where(b => b.ClassificationTypeID != 99)
+																																																																							.Where(b => b.Amount <= t2.Amount)
+																																																																							.Select(b => ToBankTransactionMin(b)).ToList();
+
+			return new QueryResults<BankTransactionMinData>(results.Count(), skip, top, results, this);
+		}
+
+		/// <summary>
+		/// Updates UCM transaction data
+		/// </summary>
+		/// <param name="ucm"><see cref=" UcmTransactionData"/>ucm</param> to update from
+		public void UpdateUcmTransaction(UcmTransactionData ucm)
+		{
+
+			//Update the UCM transaction table
+			var existing = UcmTransactions.Values.First(u => u.UcmTransactionID == ucm.UcmTransactionID);
+			UcmTransactions.TryUpdate(ucm.UcmTransactionID, ucm, existing);
+
+			//Need if statement here. Only add new audit record if "TYPE" or "STATUS" has been updated.
+			//e.g. if(ucm.
+
+			//UcmTransactionChangeAudit utca = new UcmTransactionChangeAudit();
+			//utca.ChangeDate = DateTime.Now;
+			//utca.ChangeAuditAttributeTypeID = 1; //check that type is 1
+			//utca.ChangeReason = "Incorrect debt located";
+			//utca.Change = "3";
+
+			//List<UcmTransactionChangeAudit> calist = new List<UcmTransactionChangeAudit>();
+			//calist.Add(utca);
+
+			//foreach (var audit in calist)
+			//{
+			//	CreateTransactionChangeAudit(audit);
+			//}
+
+			//When I call the endpoint 'api/ucm/update' with the reason 'This is why the Type has changed'
+			//Then A new record is created in the TransactionChangeAudit table with a unique 'AuditID'
+			//And The 'UCMTransactionID' links the to the UCM record
+			//And The 'ChangeDate' is set to the current date 
+			//And The 'Attribute' is set to '2'
+			//And The 'Change' is set to '2'
+			//And The 'ChangeReason' is set to 'This is why the Type has changed'
+			//And The 'UserID' is set to the username
+		}
+
+		/// <summary>
+		/// Deletes UCM Remittances
+		/// </summary>
+		/// <param name="ids">Remittance id</param>
+		public void DeleteRemittances(int[] ids)
+		{
+			//Get remittance detail first to get bank transactions
+			var remittanceDetails = RemittanceDetails.Values.Where(rd => ids.Contains(rd.RemittanceId));
+
+			//Delete related bank transactions
+			foreach (var BankTransactionId in remittanceDetails.SelectMany(r => r.BankTransactionIds))
+			{
+				var bankTransactionToRemove = new BankTransactionData();
+				BankTransactions.TryRemove(BankTransactionId, out bankTransactionToRemove);
+			}
+
+			//Delete remittance detail
+			foreach (var detail in remittanceDetails)
+			{
+				var remittanceDetailToRemove = new RemittanceDetail();
+				RemittanceDetails.TryRemove(detail.RemittanceTransactionID, out remittanceDetailToRemove);
+			}
+			//Delete remittances
+			foreach (var id in ids)
+			{
+				var remittanceToRemove = new Remittance();
+				Remittances.TryRemove(id, out remittanceToRemove);
+			}
+		}
+
+		// <summary>
+		/// 
+		/// </summary>
+		/// <param name="filters"></param>
+		/// <param name="skip"></param>
+		/// <param name="top"></param>
+		/// <param name="orderBy"></param>
+		/// <param name="orderByDirection"></param>
+		/// <returns></returns>
+		public QueryResults<Remittance> GetRemittances(DataFilter[] filters, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			var remittances = Remittances.Values
+															.Skip(skip)
+															.Take(top == 0 ? Remittances.Count : top)
+															.ToList();
+
+			// have to google more to make order by direction concise. this is a quick fix.
+			if (orderBy != null)
+			{
+				remittances = remittances.OrderBy(x => x.GetType().GetProperty(orderBy).GetValue(x, null)).ToList();
+
+				if (orderByDirection == "desc")
+				{
+					remittances = remittances.OrderByDescending(x => x.GetType().GetProperty(orderBy).GetValue(x, null)).ToList();
+				}
+			}
+
+			if (filters != null && filters.Any())
+			{
+				//creating the list of where clauses
+				List<Func<Remittance, bool>> wheres = BuildFilters<Remittance>(filters);
+
+				foreach (var where in wheres)
+				{
+					remittances = remittances.Where(where).ToList();
+				}
+			}
+			return new QueryResults<Remittance>(remittances.Count, skip, top, remittances, this);
+		}
+
+		/// <summary>
+		/// Gets all the bank Transactions <see cref="BankTransactionStatusData"/> for a given bank transaction id
+		/// </summary>
+		/// <param name="day"></param>
+		/// <returns>QueryResults collection of bank transaction data</returns>
+		public BankTransactionData GetUcmBankTransaction(int bankTransactionId)
+		{
+			return BankTransactions.Values.FirstOrDefault(t => t.BankTransactionID == bankTransactionId);
+		}
+
+		/// <summary>
+		/// Builds and creates a collection of filters for a given type. The filter names need to be an exact match of class property names.
+		/// </summary>
+		/// <typeparam name="T">The class type</typeparam>
+		/// <param name="filters">The <see cref="DataFilter">values</see> for which the filtering should be determined</param>
+		/// <returns>Delegate collection that can we used to eliminate the undesired items from a given collection type based on the filters</returns>
+		private List<Func<T, bool>> BuildFilters<T>(DataFilter[] filters)
+		{
+			//creating the list of where clauses based on the filters
+			var wheres = new List<Func<T, bool>>();
+
+			Func<T, string, IComparable> where = (t, name) => ((IComparable)ToTypeSafeObject(t.GetType()
+							.GetProperty(name, BindingFlags.IgnoreCase | BindingFlags.Public | BindingFlags.Instance).GetValue(t, null)));
+
+			foreach (var filter in filters)
+			{
+				switch (filter.Operator)
+				{
+					case DataFilterOperator.Equals:
+
+						wheres.Add((e) => where(e, filter.Name).CompareTo(ToTypeSafeObject(filter.Value)) == 0);
+
+						break;
+					case DataFilterOperator.Contains:
+
+						wheres.Add((c) => where(c, filter.Name).ToString().Contains(filter.Value));
+
+						break;
+					case DataFilterOperator.GreaterThan:
+
+						wheres.Add((gt) => where(gt, filter.Name).CompareTo(ToTypeSafeObject(filter.Value)) > 0);
+
+						break;
+					case DataFilterOperator.GreaterThanOrEquals:
+
+						wheres.Add((gte) => where(gte, filter.Name).CompareTo(ToTypeSafeObject(filter.Value)) >= 0);
+
+						break;
+					case DataFilterOperator.LessThan:
+
+						wheres.Add((lt) => where(lt, filter.Name).CompareTo(ToTypeSafeObject(filter.Value)) < 0);
+
+						break;
+					case DataFilterOperator.LessThanOrEquals:
+
+						wheres.Add((lte) => where(lte, filter.Name).CompareTo(ToTypeSafeObject(filter.Value)) <= 0);
+
+						break;
+					case DataFilterOperator.NotEquals:
+
+						wheres.Add((ne) => where(ne, filter.Name).CompareTo(ToTypeSafeObject(filter.Value)) != 0);
+
+						break;
+				}
+			}
+			return wheres;
+		}
+
+		/// <summary>
+		/// We need to convert to a type safe object so that we can use CompareTo
+		/// </summary>
+		/// <param name="obj"></param>
+		/// <returns></returns>
+		private object ToTypeSafeObject(object obj)
+		{
+			if (obj != null)
+			{
+				decimal dec;
+				if (decimal.TryParse(obj.ToString(), out dec))
+				{
+					return dec;
+				}
+				DateTime date;
+				if (DateTime.TryParse(obj.ToString(), out date))
+				{
+					return date;
+				}
+				bool b;
+				if (bool.TryParse(obj.ToString(), out b))
+				{
+					return b;
+				}
+				return obj.ToString();
+			}
+			return "null";
+		}
+
+		/// <summary>
+		/// Queries the UCM change audits for ones that relate to the UCM bank transaction id and the key
+		/// </summary>
+		/// <param name="id">UCM bank transaction id</param>
+		/// <param name="key">To determine weather we want audits for transaction status or transaction type</param>
+		/// <returns>The UCM change audits that relate to the UCM bank transaction id and the key</returns>
+		public List<UcmTransactionChangeAudit> GetUcmTransactionChangeAudits(int id, byte key)
+		{
+			//does this key exist in the ChangeAuditAttributeTypes class
+			var hasKey = typeof(ChangeAuditAttributeTypes).GetFields().Any(f => Convert.ToByte(f.GetValue(f)) == key);
+
+			if (!hasKey)
+			{
+				return null;
+			}
+
+			return
+							UcmTransactionChangeAudits.Values
+							.Where(u => u.UcmTransactionID == id)
+							.Where(u => u.ChangeAuditAttributeTypeID == key)
+							.Where(u => u.Change == (byte)TransactionStatusType.New).ToList();
+		}
+
+		public List<UcmTransactionChangeAudit> GetUcmTransactionChangeAudits()
+		{
+			return UcmTransactionChangeAudits.Values.ToList();
+		}
+
+		public UcmTransactionChangeAudit GetUcmTransactionChangeAudit(int id)
+		{
+			return UcmTransactionChangeAudits.Values.FirstOrDefault(u => u.AuditID == id);
+		}
+
+		/// <summary>
+		/// Gets the existing remittance status types in the database
+		/// </summary>
+		/// <returns>Returns <list type="EnumColumEnumItem"></list></returns>
+		public List<EnumColumnEnumItem> GetRemittanceStatusTypeAsEnumColumnEnumItem()
+		{
+			return new[] {
+																new EnumColumnEnumItem { Description = "Unmatched", Value = 1 },
+																new EnumColumnEnumItem { Description = "matched", Value = 2 }
+
+												}.ToList();
+		}
+
+		/// <summary>
+		/// Inserts a new remittance
+		/// </summary>
+		/// <param name="remittance">Remittance to insert</param>
+		/// <returns>Remittance ID</returns>
+		public int CreateRemittanceHeader(Remittance remittance)
+		{
+			if (remittance.RemittanceID != 0)
+			{
+				throw new Exception("Database assigns IDs during Save() method");
+			}
+
+			remittance.RemittanceID = Remittances.Count + 1;
+
+			if (!Remittances.TryAdd(remittance.RemittanceID, remittance))
+			{
+				throw new Exception("Unable to add remittance to database");
+			}
+
+			return remittance.RemittanceID;
+		}
+
+		/// <summary>
+		/// Inserts a collection of UCM Remittances Details
+		/// </summary>
+		/// <param name="remittanceDetails"></param>
+		public void CreateUcmRemittanceDetails(List<UcmRemittanceDetail> remittanceDetails)
+		{
+			if (remittanceDetails == null) return;
+
+			var bankTransactions = remittanceDetails.Select(r => new BankTransactionData
+			{
+				Amount = r.Amount,
+				BankCode = r.BankCode,
+				TransactionDate = r.TransactionDate,
+				ItemStatusTypeID = null,
+				ClassificationTypeID = r.ClassificationTypeID,
+				StatementID = null,
+				Description = r.Description,
+				Creditor = r.Creditor
+			}).ToList();
+
+			CreateBankTransactionBatch(bankTransactions);
+		}
+
+		/// <summary>
+		/// Checks to see if there are any duplicated remittance headers
+		/// </summary>
+		/// <param name="creditorName">Creditor name</param>
+		/// <param name="receivedDate">Received date</param>
+		/// <param name="totalValue">Total value</param>
+		/// <param name="noTransactions">Number of transactions</param>
+		/// <returns>A count of matching remittances</returns>
+		public int GetRemittanceHeaderCount(string remittanceName, DateTime receivedDate, decimal totalValue, int noTransactions)
+		{
+			var count = Remittances.Values.Where(r => r.RemittanceName == remittanceName)
+											.Where(r => r.ReceivedDate == receivedDate)
+											.Where(r => r.TotalValue == totalValue)
+											.Where(r => r.NoTransactions == noTransactions)
+											.Count();
+
+			return count;
+		}
+
+		/// <summary>
+		/// Returns a list of remittances from the remittance ID array.
+		/// </summary>
+		/// <param name="ids">Integer array of remittances</param>
+		/// <returns></returns>
+		public List<Remittance> GetRemittances(int[] ids)
+		{
+			return Remittances.Values.Where(r => ids.Contains(r.RemittanceID)).ToList();
+		}
+
+		/// <summary>
+		/// Gets a single remittance from the remittance ID
+		/// </summary>
+		/// <param name="id">Remittance ID</param>
+		/// <returns><see cref="Remittance"/></returns>
+		public Remittance GetRemittance(int id)
+		{
+			return Remittances.Values.Where(r => r.RemittanceID == id).FirstOrDefault();
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="id"></param>
+		/// <param name="filters"></param>
+		/// <param name="skip"></param>
+		/// <param name="top"></param>
+		/// <param name="orderBy"></param>
+		/// <param name="orderByDirection"></param>
+		/// <returns></returns>
+		public QueryResults<UcmRemittanceDetail> GetUcmRemittanceDetail(int id, DataFilter[] filters, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			//getting the bank transaction ids from the remittance details dictionary
+			var bankTransactionIds = RemittanceDetails.Values.Where(rd => rd.RemittanceId == id)
+							.SelectMany(rd => rd.BankTransactionIds)
+							.ToArray();
+
+			//getting the bank transactions based on the ids above
+			var bts = BankTransactions.Values.Where(b => bankTransactionIds.Contains(b.BankTransactionID)).ToList();
+
+			var results = new List<UcmRemittanceDetail>();
+
+			foreach (var bt in bts)
+			{
+				var ucmForBt = UcmTransactions.Values.FirstOrDefault(u => u.BankTransactionID == bt.BankTransactionID);
+
+				results.Add(new UcmRemittanceDetail
+				{
+					RemittanceID = id,
+					BankTransactionID = bt.BankTransactionID,
+					Amount = bt.Amount,
+					BankCode = bt.BankCode,
+					ClassificationTypeID = bt.ClassificationTypeID,
+					Creditor = bt.Creditor,
+					Description = bt.Description,
+					StatementID = bt.StatementID,
+					TransactionDate = bt.TransactionDate,
+					TransactionStatusTypeID = ucmForBt != null ? ucmForBt.TransactionStatusTypeID : null,
+					TransactionReturnReasonTypeID = (byte)TransactionReturnReasonType.Unknown
+				});
+			}
+
+			if (filters != null && filters.Any())
+			{
+
+				var wheres = BuildFilters<UcmRemittanceDetail>(filters);
+
+				foreach (var where in wheres)
+				{
+					results = results.Where(where).ToList();
+				}
+			}
+
+			if (orderBy != null)
+			{
+				results = results.OrderBy(r => r.GetType().GetProperty(orderBy).GetValue(r, null)).ToList();
+
+				if (orderByDirection == "desc")
+				{
+					results = results.OrderByDescending(r => r.GetType().GetProperty(orderBy).GetValue(r, null)).ToList();
+				}
+			}
+
+			return new QueryResults<UcmRemittanceDetail>(results.Count, skip, top, results, this);
+		}
+
+		/// <summary>
+		/// Updates a remittance
+		/// </summary>
+		/// <param name="remittance"></param>
+		public void UpdateRemittanceHeader(Remittance remittance)
+		{
+			var dbRemittance = Remittances.Values.FirstOrDefault(r => r.RemittanceID == remittance.RemittanceID);
+
+			var newRemittance = new Remittance
+			{
+				RemittanceID = remittance.RemittanceID,
+				RemittanceStatusTypeID = remittance.RemittanceStatusTypeID,
+				PotentialMatches = remittance.PotentialMatches,
+				Comment = remittance.Comment,
+				CommentSaved = remittance.CommentSaved,
+				CommentSavedBy = remittance.CommentSavedBy,
+				BankTransactionID = dbRemittance.BankTransactionID,
+				RemittanceName = dbRemittance.RemittanceName,
+				Delete = dbRemittance.Delete,
+				ItemStatus = dbRemittance.ItemStatus,
+				NoTransactions = remittance.NoTransactions,
+				ReceivedDate = dbRemittance.ReceivedDate,
+				TotalValue = remittance.TotalValue,
+				UCMTransactionID = dbRemittance.UCMTransactionID,
+			};
+
+			if (!Remittances.TryUpdate(newRemittance.RemittanceID, newRemittance, dbRemittance))
+			{
+				Console.Write("Unable to update Remittance");
+			}
+		}
+
+		/// <summary>
+		/// Check to see if any unmatched remittances match an amount within the newly identified UCMs (following 'save UCM' on REC1.1.1) and if a match found set 'potential match' flag to 'true'.
+		/// </summary>
+		/// <param name="id">Remittance ID</param>
+		/// <param name="filters">filters used in the query</param>
+		/// <param name="skip">The number of records to skip before returning</param>
+		/// <param name="top">the number of records to return</param>
+		/// <param name="orderBy">The order in which to return the records</param>
+		/// <param name="orderByDirection">ASC or DESC</param>
+		/// <returns>Returns the Query Results of <see cref="UcmTransactionData"/></returns>
+		public QueryResults<PotentialUcmMatches> PotentialMatches(int id, DataFilter[] filters, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			var remittances = Remittances.Values.Where(r => r.RemittanceStatusTypeID == (byte)RemittanceStatusType.Unmatched);
+
+			var ucmResults = UcmTransactions.Values.Where(
+							u => !remittances.Select(r => r.BankTransactionID).Contains(u.BankTransactionID))
+							.Where(u => remittances.Any(r => r.TotalValue == u.Amount));
+
+			var results = ucmResults.Select(p => new PotentialUcmMatches
+			{
+				UcmTransactionID = p.UcmTransactionID,
+				Amount = p.Amount,
+				Creditor = p.Creditor,
+				BankTransactionID = p.BankTransactionID,
+				Description = p.Description,
+				TransactionDate = p.TransactionDate,
+				TransactionReturnMethodTypeID = p.TransactionReturnMethodTypeID,
+				TransactionReturnReasonTypeID = p.TransactionReturnReasonTypeID,
+				TransactionStatusTypeID = p.TransactionStatusTypeID,
+				UcmReference = p.UcmReference,
+			});
+
+			if (filters != null && filters.Any())
+			{
+
+				var wheres = BuildFilters<PotentialUcmMatches>(filters);
+
+				foreach (var where in wheres)
+				{
+					results = results.Where(where);
+				}
+			}
+
+			if (orderBy != null)
+			{
+				results = results.OrderBy(x => x.GetType().GetProperty(orderBy).GetValue(x, null));
+
+				if (orderByDirection == "desc")
+				{
+					results = results.OrderByDescending(x => x.GetType().GetProperty(orderBy).GetValue(x, null));
+				}
+			}
+
+			return new QueryResults<PotentialUcmMatches>(results.Count(), skip, top, results, this);
+		}
+
+		/// <summary>
+		/// Matches a remittance with Ucm
+		/// </summary>
+		/// <param name="remittance"><see cref="Remittance"/> object</param>
+		public void CreateUcmRemittanceMatch(Remittance remittance)
+		{
+			var ucm = UcmTransactions.Values
+							.FirstOrDefault(s => s.UcmTransactionID == remittance.UCMTransactionID);
+
+			remittance.BankTransactionID = ucm.BankTransactionID;
+			remittance.RemittanceStatusTypeID = (int)RemittanceStatusType.Matched;
+			remittance.PotentialMatches = false;
+
+			var lines = GetUcmRemittanceDetail(remittance.RemittanceID, new DataFilter[] { }).Items;
+
+			foreach (var line in lines)
+			{
+				UpdateBankTransactionClassification(new BankTransactionData
+				{
+					BankTransactionID = line.BankTransactionID,
+					Amount = line.Amount,
+					Creditor = line.Creditor,
+					Description = line.Description,
+					TransactionDate = ucm.TransactionDate
+				});
+			}
+
+			if (!Remittances.TryUpdate(remittance.RemittanceID, remittance, Remittances.Values.FirstOrDefault(r => remittance.RemittanceID == r.RemittanceID)))
+			{
+				Console.Write("Unable to update Remittance");
+			}
+		}
+		/// <summary>
+		/// Returns a list of <see cref="UcmTransactionData"/>
+		/// </summary>
+		/// <returns></returns>
+		public List<UcmTransactionData> GetUcmTransactions()
+		{
+			return UcmTransactions.Values.ToList();
+		}
+
+		/// <summary>
+		/// Gets a list of Ucms that are related to a remittance
+		/// </summary>
+		/// <param name="id">Remittance ID</param>
+		/// <returns>List if Ucms for the supplied remittance</returns>
+		public List<UcmRemittanceDetail> GetUcmsForRemittance(int id)
+		{
+			var transactionIDs =
+					RemittanceDetails.Values.Where(r => r.RemittanceId == id).SelectMany(r => r.BankTransactionIds);
+
+			var transactions = BankTransactions.Values.Where(b => transactionIDs.Contains(b.BankTransactionID));
+
+			var ucmtransactions = UcmTransactions.Values.Where(u => transactionIDs.Contains(u.UcmTransactionID));
+
+			var result = new List<UcmRemittanceDetail>();
+
+			foreach (var item in transactions)
+			{
+				var ucm = ucmtransactions.FirstOrDefault(u => u.BankTransactionID == item.BankTransactionID);
+				if (ucm != null)
+				{
+					result.Add(new UcmRemittanceDetail()
+					{
+						Description = item.Description,
+						RemittanceID = id,
+						BankTransactionID = item.BankTransactionID,
+						TransactionStatusTypeID = ucm.TransactionStatusTypeID,
+						Amount = item.Amount,
+						BankCode = item.BankCode,
+						ClassificationTypeID = item.ClassificationTypeID,
+						Creditor = item.Creditor,
+						TransactionDate = item.TransactionDate,
+						UCMTransactionID = ucm.UcmTransactionID,
+						DebtPaymentID = ucm.DebtPaymentID ?? null
+
+					});
+				}
+			}
+
+			return result;
+
+		}
+
+		/// <summary>
+		/// Gets the Ucm overview
+		/// </summary>
+		/// <returns><see type="UcmOverview"/></returns>
+		public UcmOverview GetUcmOverview()
+		{
+			var ucmoverviewdata = new UcmOverview()
+			{
+				LocatedQty = 2,
+				LocatedTotalAmount = 100.22m,
+				UnworkedWithoutPotentialDebtQty = 3,
+				UnworkedWithoutPotentialDebtTotalAmount = 99m,
+				PotentialDebtsQty = 1,
+				PotentialDebtsTotalAmount = 102.22m,
+				WorkInProgressQty = 3,
+				WorkInProgressTotalAmount = 122.99m,
+				ReadyToTransferToT1Qty = 12,
+				ReadyToTransferToT1Amount = 14.23m,
+				BulkQty = 4,
+				BulkTotalAmount = 45.36m,
+				FailedToApplyQty = 6,
+				FailedToApplyTotalAmount = 12.45m,
+				FailedValidationQty = 3,
+				FailedValidationTotalAmount = 34.00m,
+				InUCMByErrorAmount = 23.90m,
+				InUCMByErrorQty = 1,
+				ReadyToApplyQty = 2,
+				ReadyToApplyTotalAmount = 123.90m,
+				ReadyToReturnToSourceMQty = 23,
+				ReadyToReturnToSourceMAmount = 45.99m,
+				RemovedFromUcmQty = 34,
+				RemovedFromUcmAmount = 56.78m,
+				TransferredToT1Qty = 34,
+				TransferredToT1Amount = 123.98m
+			};
+			return ucmoverviewdata;
+
+		}
+
+		/// <summary>
+		/// Gets the Ucm WIP overview
+		/// </summary>
+		/// <returns><see type="UcmOverview"/></returns>
+		public UcmOverview GetUcmWIPOverview()
+		{
+			var ucmoverviewdata = new UcmOverview()
+			{
+				LocatedQty = 2,
+				LocatedTotalAmount = 100.22m,
+				UnworkedWithoutPotentialDebtQty = 3,
+				UnworkedWithoutPotentialDebtTotalAmount = 99m,
+				PotentialDebtsQty = 1,
+				PotentialDebtsTotalAmount = 102.22m,
+				WorkInProgressQty = 3,
+				WorkInProgressTotalAmount = 122.99m,
+				ReadyToTransferToT1Qty = 12,
+				ReadyToTransferToT1Amount = 14.23m,
+				BulkQty = 4,
+				BulkTotalAmount = 45.36m,
+				FailedToApplyQty = 6,
+				FailedToApplyTotalAmount = 12.45m,
+				FailedValidationQty = 3,
+				FailedValidationTotalAmount = 34.00m,
+				InUCMByErrorAmount = 23.90m,
+				InUCMByErrorQty = 1,
+				ReadyToApplyQty = 2,
+				ReadyToApplyTotalAmount = 123.90m,
+				ReadyToReturnToSourceMQty = 23,
+				ReadyToReturnToSourceMAmount = 45.99m,
+				RemovedFromUcmQty = 34,
+				RemovedFromUcmAmount = 56.78m,
+				TransferredToT1Qty = 34,
+				TransferredToT1Amount = 123.98m
+			};
+			return ucmoverviewdata;
+
+		}
+
+		/// <summary>
+		/// Gets the Remittance overview
+		/// </summary>
+		/// <returns><see type="RemittanceOverview"/></returns>
+		public RemittanceOverview GetRemittanceOverview()
+		{
+			var remittanceoverview = new RemittanceOverview()
+			{
+				RemittanceProcessing = new RemittanceProcessing
+				{
+					PotentialMatches = 2,
+					Unmatched14DaysPlus = 3
+				},
+
+				Located = new Located()
+				{
+					FailedValidationQty = 4,
+					FailedToApplyQty = 5,
+					FailedPreworkQty = 6,
+					FailedToDeleteQty = 7,
+					LocatedQty = 8,
+					LocatedAFQty = 9,
+					PreworkCompleteAwaitingFundsQty = 10,
+					FailedPreworkAmount = 100.00m,
+					FailedToApplyAmount = 101.00m,
+					FailedToDeleteAmount = 102.00m,
+					FailedValidationAmount = 103.00m,
+					LocatedAFAmount = 104.00m,
+					LocatedAmount = 105.00m,
+					PreworkCompleteAwaitingFundsAmount = 106.00m
+				},
+
+				Unlocated = new Unlocated()
+				{
+					PotentialDebtsQty = 11,
+					TooManyMatchesQty = 12,
+					UnworkedQty = 13,
+					WIPQty = 14,
+					WIPStage1Qty = 15,
+					WIPStage2Qty = 16,
+					WIPStage3Qty = 17,
+					WIPExpiredQty = 18,
+					PotentialDebtsAmount = 107.00m,
+					TooManyMatchesAmount = 108.00m,
+					UnworkedAmount = 109.00m,
+					WIPAmount = 110.00m,
+					WIPExpiredAmount = 111.00m,
+					WIPStage1Amount = 112.00m,
+					WIPStage2Amount = 113.00m,
+					WIPStage3Amount = 114.00m
+				},
+
+				ReadyToApply = new ReadyToApply()
+				{
+					ReadyToApplyQty = 19,
+					ReadyToApplyAFQty = 20,
+					ReadyToApplyFRQty = 21,
+					ReadyToApplyAFAmount = 115.00m,
+					ReadyToApplyAmount = 116.00m,
+					ReadyToApplyFRAmount = 117.00m
+				},
+
+				Trust2TeamActionComplete = new Trust2TeamActionComplete()
+				{
+					ReadyToTransferT1Qty = 22,
+					TransferredT1Qty = 23,
+					RemainInT2Qty = 24,
+					ReturnToSourceMQty = 25,
+					ReturnedToSourceViaT1Qty = 26
+				}
+			};
+
+			return remittanceoverview;
+		}
+
+		/// <summary>
+		/// Gets the Remittance WIP overview
+		/// </summary>
+		/// <returns><see type="RemittanceOverview"/></returns>
+		public RemittanceOverview GetRemittanceWIPOverview()
+		{
+			var remittanceoverview = new RemittanceOverview()
+			{
+				RemittanceProcessing = new RemittanceProcessing
+				{
+					PotentialMatches = 2,
+					Unmatched14DaysPlus = 3
+				},
+
+				Located = new Located()
+				{
+					FailedValidationQty = 4,
+					FailedToApplyQty = 5,
+					FailedPreworkQty = 6,
+					FailedToDeleteQty = 7,
+					LocatedQty = 8,
+					LocatedAFQty = 9,
+					PreworkCompleteAwaitingFundsQty = 10,
+					FailedPreworkAmount = 100.00m,
+					FailedToApplyAmount = 101.00m,
+					FailedToDeleteAmount = 102.00m,
+					FailedValidationAmount = 103.00m,
+					LocatedAFAmount = 104.00m,
+					LocatedAmount = 105.00m,
+					PreworkCompleteAwaitingFundsAmount = 106.00m
+				},
+
+				Unlocated = new Unlocated()
+				{
+					PotentialDebtsQty = 11,
+					TooManyMatchesQty = 12,
+					UnworkedQty = 13,
+					WIPQty = 14,
+					WIPStage1Qty = 15,
+					WIPStage2Qty = 16,
+					WIPStage3Qty = 17,
+					WIPExpiredQty = 18,
+					PotentialDebtsAmount = 107.00m,
+					TooManyMatchesAmount = 108.00m,
+					UnworkedAmount = 109.00m,
+					WIPAmount = 110.00m,
+					WIPExpiredAmount = 111.00m,
+					WIPStage1Amount = 112.00m,
+					WIPStage2Amount = 113.00m,
+					WIPStage3Amount = 114.00m
+				},
+
+				ReadyToApply = new ReadyToApply()
+				{
+					ReadyToApplyQty = 19,
+					ReadyToApplyAFQty = 20,
+					ReadyToApplyFRQty = 21,
+					ReadyToApplyAFAmount = 115.00m,
+					ReadyToApplyAmount = 116.00m,
+					ReadyToApplyFRAmount = 117.00m
+				},
+
+				Trust2TeamActionComplete = new Trust2TeamActionComplete()
+				{
+					ReadyToTransferT1Qty = 22,
+					TransferredT1Qty = 23,
+					RemainInT2Qty = 24,
+					ReturnToSourceMQty = 25,
+					ReturnedToSourceViaT1Qty = 26
+				}
+			};
+
+			return remittanceoverview;
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="Id">Bank transaction Id</param>
+		/// <returns></returns>
+		public Remittance GetRemittanceForTransaction(int Id)
+		{
+			var remittances = RemittanceDetails.Values
+				.Where(rd => rd.BankTransactionIds.Contains(Id))
+				.FirstOrDefault();
+
+			if (remittances != null)
+			{
+				return Remittances.Values.FirstOrDefault(r => r.RemittanceID == remittances.RemittanceId);
+			}
+			return null;
+		}
+
+		/// <summary>
+		/// Retrieves the Ucm from the TransactionStatusTypeID
+		/// </summary>
+		/// <param name="status">TransactionStatusType</param>
+		/// <returns><list type="UcmTransactionData"/></returns>
+		public List<UcmTransactionData> GetUcmsFromTransactionStatusType(TransactionStatusType status)
+		{
+			return UcmTransactions.Values.Where(u => u.TransactionStatusTypeID == (int)status).ToList();
+		}
+
+		/// <summary>
+		/// Returns a remittance Id for a specific UCM transaction Id
+		/// </summary>
+		/// <param name="id"><see cref="int"/>UCM transaction Id</param>
+		/// <returns><see cref="int"/>Remittance Id</returns>
+		public int GetRemittanceIdByUCMTransactionIdMatched(int id)
+		{
+			var remittanceDetail = RemittanceDetails.Values.FirstOrDefault(rd => rd.BankTransactionIds.Contains(id));
+
+			if (remittanceDetail != null)
+			{
+				return remittanceDetail.RemittanceId;
+			}
+			return 0;
+		}
+
+		/// <summary>
+		/// Deletes remittance details and remittance if all the detail has been deleted
+		/// </summary>
+		/// <param name="remittanceID">Remittance ID</param>
+		/// <param name="ucmIDs">UCM IDs</param>
+		/// <returns>Number of rows affected</returns>
+		public int DeleteUCMRemittanceDetail(int remittanceID, int[] ucmIDs)
+		{
+			var removedTransactions = new List<BankTransactionData>();
+			foreach (var id in ucmIDs)
+			{
+				UcmTransactionData ucm = null;
+				UcmTransactions.TryRemove(id, out ucm);
+
+				BankTransactionData bank = null;
+				BankTransactions.TryRemove(ucm.BankTransactionID, out bank);
+
+				removedTransactions.Add(bank);
+			}
+
+			Remittance remittance = null;
+			Remittances.TryGetValue(remittanceID, out remittance);
+
+			if (remittance.NoTransactions == ucmIDs.Count())
+			{
+				Remittances.TryRemove(remittanceID, out remittance);
+			}
+			else
+			{
+				remittance.NoTransactions = remittance.NoTransactions - ucmIDs.Count();
+				remittance.TotalValue = remittance.TotalValue - removedTransactions.Sum(t => t.Amount);
+
+				var existingValueToUpdate = Remittances.Values.First(r => r.RemittanceID == remittance.RemittanceID);
+				Remittances.TryUpdate(remittance.RemittanceID, remittance, existingValueToUpdate);
+			}
+
+			return ucmIDs.Count();
+		}
+
+		/// <summary>
+		/// Gets the transfers overview
+		/// </summary>
+		/// <returns><see type="Transfers overview"/></returns>
+		public TransfersOverview GetTransfersOverview()
+		{
+			var transfersOverviewData = new TransfersOverview()
+			{
+
+				ReadyToTransferToT1Qty = 2,
+				ReadyToTransferToT1Amount = 100.22m,
+				ReadyToTransferToT3Qty = 3,
+				ReadyToTransferToT3Amount = 99m,
+				NoTransferRequiredQty = 1,
+				NoTransferRequiredAmount = 102.22m,
+				ReadyToReturnToSourceQty = 3,
+				ReadyToReturnToSourceAmount = 122.99m
+
+			};
+			return transfersOverviewData;
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="id"></param>
+		/// <param name="filters"></param>
+		/// <param name="skip"></param>
+		/// <param name="top"></param>
+		/// <param name="orderBy"></param>
+		/// <param name="orderByDirection"></param>
+		/// <returns></returns>
+		public QueryResults<TransferData> GetTransactions(DataFilter[] filters, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+
+			var results = new List<TransferData>();
+
+			foreach (var ucm in UcmTransactions)
+			{
+				//var ucmForBt = UcmTransactions.Values.FirstOrDefault(u => u.BankTransactionID == bt.BankTransactionID);
+
+				results.Add(new TransferData
+				{
+					TransferRequestDate = ucm.Value.TransferRequestDate,
+					TransactionStatusTypeID = ucm.Value.TransactionStatusTypeID,
+					TransactionDate = ucm.Value.TransactionDate,
+					UcmTransactionId = ucm.Value.UcmTransactionID,
+					Amount = ucm.Value.Amount,
+					Description = ucm.Value.Description,
+				});
+			}
+
+			if (filters != null && filters.Any())
+			{
+				var wheres = BuildFilters<TransferData>(filters);
+
+				foreach (var where in wheres)
+				{
+					results = results.Where(where).ToList();
+				}
+			}
+
+			if (orderBy != null)
+			{
+				results = results.OrderBy(r => r.GetType().GetProperty(orderBy).GetValue(r, null)).ToList();
+
+				if (orderByDirection == "desc")
+				{
+					results = results.OrderByDescending(r => r.GetType().GetProperty(orderBy).GetValue(r, null)).ToList();
+				}
+			}
+
+			return new QueryResults<TransferData>(results.Count, skip, top, results, this);
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="remittanceID"></param>
+		/// <returns></returns>
+		public List<UcmTransactionData> GetUCMTransactionDataByRemittanceID(int remittanceID)
+		{
+			var BtIds =
+				RemittanceDetails.Values.Where(rd => rd.RemittanceId == remittanceID).
+				SelectMany(i => i.BankTransactionIds).ToList();
+
+			var ucms = UcmTransactions.Values.Where(u => BtIds.Contains(u.BankTransactionID)).ToList();
+			return ucms;
+		}
+
+		public List<UcmTransactionData> GetUcmTransactions(int[] ucmIds)
+		{
+
+			var ucms = UcmTransactions.Values.Where(u => ucmIds.Contains(u.UcmTransactionID)).ToList();
+			return ucms;
+
+		}
+
+		public void CreateUcmNote(UcmNote note)
+		{
+			throw new NotImplementedException();
+		}
+
+		public UcmTransactionData GetNextUcmTransactionData(List<int> ids, int remittanceId, int classificationTypeId, DataFilter[] filters, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			var additionalCondition = ids.Count == 0;
+			IEnumerable<UcmTransactionData> ucms = null;
+			if (remittanceId == 0)
+			{
+				ucms = UcmTransactions.Values.Select
+					(u => new UcmTransactionData
+					{
+						UcmTransactionID = u.UcmTransactionID,
+						UcmReference = u.UcmReference,
+						TransactionDate = u.TransactionDate,
+						Amount = u.Amount,
+						Creditor = u.Creditor,
+						Description = u.Description,
+						TransactionReturnReasonTypeID = u.TransactionReturnReasonTypeID,
+						TransactionStatusTypeID = u.TransactionStatusTypeID,
+						TransactionReturnMethodTypeID = u.TransactionReturnMethodTypeID,
+						LocatedStatusTypeID = u.LocatedStatusTypeID,
+						ClientID = u.ClientID,
+						DebtNumber = u.DebtNumber,
+						DebtAccountNumber = u.DebtAccountNumber,
+						SortCode = u.SortCode,
+						ClassificationTypeID = u.ClassificationTypeID,
+						BankTransactionID = u.BankTransactionID,
+						PotentialDebts = u.PotentialDebts,
+						DebtPaymentID = u.DebtPaymentID,
+						TransferRequestDate = u.TransferRequestDate,
+					});
+
+			}
+			else
+			{
+				ucms =
+					UcmTransactions.Values.Where(
+						u => RemittanceDetails.Values.SelectMany(r => r.BankTransactionIds).Contains(u.BankTransactionID))
+						.Select(u => new UcmTransactionData
+						{
+							UcmTransactionID = u.UcmTransactionID,
+							UcmReference = u.UcmReference,
+							TransactionDate = u.TransactionDate,
+							Amount = u.Amount,
+							Creditor = u.Creditor,
+							Description = u.Description,
+							TransactionReturnReasonTypeID = u.TransactionReturnReasonTypeID,
+							TransactionStatusTypeID = u.TransactionStatusTypeID,
+							TransactionReturnMethodTypeID = u.TransactionReturnMethodTypeID,
+							LocatedStatusTypeID = u.LocatedStatusTypeID,
+							ClientID = u.ClientID,
+							DebtNumber = u.DebtNumber,
+							DebtAccountNumber = u.DebtAccountNumber,
+							SortCode = u.SortCode,
+							ClassificationTypeID = u.ClassificationTypeID,
+							BankTransactionID = u.BankTransactionID,
+							PotentialDebts = u.PotentialDebts,
+							DebtPaymentID = u.DebtPaymentID,
+							TransferRequestDate = u.TransferRequestDate,
+						});
+			}
+
+			var ucm = ucms.FirstOrDefault(u => (additionalCondition || !ids.Contains(u.UcmTransactionID)) &&
+			u.ClassificationTypeID == (int)ClassificationType.BarclaysTrust2);
+
+			return ucm;
+
+		}
+
+		public WorkflowUcmTransactionSummary GetWorkGroupData(int workflowGroupId)
+		{
+			var value = new WorkflowUcmTransactionSummary
+			{
+				DaysLeft = 1,
+				GroupName = "Test",
+			};
+			return value;
+		}
+
+		public IList<WorkflowStages> GetWorkflowGroupStages(int workflowGroupId)
+		{
+			var WorkflowStages = new List<WorkflowStages>()
+				{
+						new WorkflowStages()
+						{
+								CommunicationType = "letter",
+								Stage = "Test Stage"
+						},
+						new WorkflowStages()
+						{
+								CommunicationType = "email",
+								Stage = "prelim"
+						}
+				};
+			return WorkflowStages.ToList<WorkflowStages>();
+		}
+
+		public QueryResults<WorkflowGroupDetail> GetWorkflowGroupDetails(DataFilter[] filters, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			var value = new List<WorkflowGroupDetail>()
+						{
+								new WorkflowGroupDetail
+
+								{
+									 WorkflowGroupID = 1,
+									 GroupName = "abc",
+									 CreatedDate = new DateTime().Date,
+									 Stage = 2,
+									 ActionRequired = true,
+									 NoOfTransactions = 5,
+									 Amount = 233.9m,
+									 RemittanceID = 1
+								}
+						};
+
+			return new QueryResults<WorkflowGroupDetail>(0, skip, top, value.AsEnumerable(), this); ;
+		}
+
+		public IList<WorkflowUCMTransactionData> GetWorkflowUCMs(int workflowGroupId, DataFilter[] filters, int skip = 0, int top = 0, string orderBy = null, string orderByDirection = null)
+		{
+			var value = new List<WorkflowUCMTransactionData>()
+						{
+								new WorkflowUCMTransactionData
+
+								{
+										Amount = 299.3m,
+										Description = "Test",
+										CreatedDate = new DateTime().Date,
+										UcmTransactionId = 1
+								}
+						};
+
+			return value.ToList();
+		}
+
+		QueryResults<WorkflowUCMTransactionData> IDataReader.GetWorkflowUCMs(int workflowGroupId, DataFilter[] filters, int skip, int top, string orderBy, string orderByDirection)
+		{
+			var value = new List<WorkflowUCMTransactionData>()
+				{
+								new WorkflowUCMTransactionData
+
+								{
+
+										Amount = 299.3m,
+										Description = "Test",
+										CreatedDate = new DateTime().Date,
+										UcmTransactionId = 1
+								}
+				};
+
+			QueryResults<WorkflowUCMTransactionData> qr = new QueryResults<WorkflowUCMTransactionData>(1, 0, 0, value.ToList<WorkflowUCMTransactionData>(), null);
+
+			return qr;
+		}
+
+		/// <summary>
+		/// Add a workflow extension with a comment
+		/// </summary>
+		/// <param name="workflowStageExtension"></param>
+		public void AddWorkflowStageExtension(WorkflowGroupAuditComment workflowGroupAudit)
+		{
+			SaveWorkFlowGroupComment(workflowGroupAudit);
+		}
+
+		/// <summary>
+		/// Creates a new workflow grup comment
+		/// </summary>
+		/// <param name="workflowStageExtension"></param>
+		public void CreateWorkflowGroupComment(WorkflowGroupAuditComment workflowGroupAudit)
+		{
+			SaveWorkFlowGroupComment(workflowGroupAudit);
+		}
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="workflowGroupID"></param>
+		/// <returns></returns>
+		public List<WorkflowGroupAuditComment> GetWorkflowGroupAuditComments(int workflowGroupID)
+		{
+			var value = WorflowGroupAuditComment.Values.Where(w => w.WorkflowGroupID == workflowGroupID)
+				.OrderByDescending(x => x.WorkflowGroupID);
+			return value.ToList();
+
+		}
+
+		public void CommenceCreditorCommuncation(int workflowGroupId, int commType, string user)
+		{
+            dataFlag = true;
+		}
+
+        /// <summary>
+        /// This method exists to return a simple flag bool
+        /// </summary>
+        /// <returns>boolean of if the flag is true or false</returns>
+        public bool getDataFlag()
+        {
+            return dataFlag;
+        }
+
+		/// <summary>
+		/// Update the workflow group transaction
+		/// </summary>
+		/// <param name="ucmID">ucm transaction ID</param>
+		/// <param name="isActive">Is the ucm active in the workflow group</param>
+		public void UpdateWorkflowGroupTransaction(int ucmID, bool isActive)
+		{
+			return;
+		}
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="workflowGroupID"></param>
+    /// <returns></returns>
+    public List<WorkflowUCMTransactionData> GetWorkflowUCMs(int workflowGroupID)
+    {
+            return new List<WorkflowUCMTransactionData>()
+      {
+          new WorkflowUCMTransactionData()
+          {
+              Active = true,
+              ClassificationTypeID = 1,
+              Description = "Test WorkflowUCMTransactionData1",
+              UcmTransactionId = 1,
+              Amount = 2.3m,
+              TransactionDate = new DateTime(2016,5,5)
+          }
+      };
+    }
+
+    public void SetWorkflowInactive(int ucmId)
+    {
+			return;
+    }
+  }
+}

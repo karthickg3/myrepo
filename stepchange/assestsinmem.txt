@@ -1,0 +1,150 @@
+using FCC.FinancialPortal.Domain.Interface;
+using FCC.Services.Assets.Contracts;
+using FCC.FinancialPortal.Domain.Enum;
+using System;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Collections.Generic;
+using FCC.FinancialPortal.Domain;
+
+namespace FCC.FinancialPortal.DataAccess.InMemory
+{
+  public class AssetsAndLiabilitiesServiceInMemory : IAssetsAndLiabilitiesService
+  {
+    private ClientDebtLocatedStatusType LocatedStatus { get; set; }
+    private TransactionStatusType TransactionStatus { get; set; }
+    private DebtPaymentAction[] DebtPaymentActions { get; set; }
+    private DebtPaymentAction DebtPaymentAction { get; set; }
+
+		private List<ClientDebt> ClientDebts { get; set; }
+
+		private DebtPaymentAction[] DebtPaymentDeleteActions { get; set; }
+    private DebtPaymentAction[] DebtPaymentUpdateActions { get; set; }
+
+
+
+    /// <summary>
+    /// Makes a HTTP Request to the COP Root service where we can get the URI for the Assets and liabilities service
+    /// We then perform a second HTTP request to Assets and liabilities passing the required search terms 
+    /// </summary>
+    /// <param name="ucm"><see cref="UcmTransactionData"/> Ucm to be used for search terms</param>
+    /// <returns>potential client debt that meet the search term criteria</returns>
+    public async Task<ClientDebts> GetClientPotentialDebts(ClientDebtSearchTerms clientSearchTerms, bool isRemittance)
+    {
+      return await Task.Run(() =>
+      {
+        return new ClientDebts
+        {
+          Results = ClientDebts,
+          LocatedStatus = LocatedStatus,
+        };
+
+      });
+    }
+
+    /// <summary>
+    /// Apply located debt
+    /// </summary>
+    /// <param name="debtPayment"></param>
+    /// <returns>potential client debt that meet the search term criteria</returns>
+    public async Task<DebtPaymentAction> ApplyDebtPayment(DebtPayment debtPayment)
+    {
+      return DebtPaymentAction;
+
+    }
+
+    /// <summary>
+    /// Delete pending debt
+    /// </summary>
+    /// <param name="debtPaymentID">Debt payment Id</param>
+    /// <returns><see cref="DebtPaymentAction"/> to show the outcome of the request</returns>
+    public async Task<DebtPaymentAction> DeleteDebtPayment(int pendingReturnID)
+    {
+      return DebtPaymentAction;
+    }
+
+    /// <summary>
+    /// Applies a debt status
+    /// </summary>
+    /// <param name="debtPaymentIDs">Debt payment Ids</param>
+    /// <returns><see cref="DebtPaymentAction"/> to show the outcome of the request</returns>
+    public async Task<List<DebtPaymentAction>> DebtPaymentStatus(int[] pendingReturnIds)
+    {
+      return DebtPaymentActions.ToList();
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="status"></param>
+    public void SetLocatedStatus(ClientDebtLocatedStatusType status)
+    {
+      LocatedStatus = status;
+		}
+
+    public void SetTransactionStatus(TransactionStatusType status)
+    {
+      TransactionStatus = status;
+    }
+
+    public void SetDebtPaymentActions(DebtPaymentAction[] paymentActions)
+    {
+      DebtPaymentActions = paymentActions;
+    }
+
+    public void SetDebtPaymentAction(DebtPaymentAction paymentAction)
+    {
+      DebtPaymentAction = paymentAction;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="debtPaymentIDs"></param>
+    /// <returns></returns>
+    public async Task<DebtPaymentAction[]> DeleteDebtPayments(int[] debtPaymentIDs)
+    {
+      return DebtPaymentDeleteActions;
+    }
+
+    /// <summary>
+    /// Used just to set the status of the debt payment entry for when debts need to be taken off hold in DMS (delete pre-work)
+    /// </summary>
+    /// <param name="debtPayments"><list type="Debt Payments">DebtPayment array</list></param>
+    /// <returns><see cref="DebtPaymentAction"/></returns>
+    public async Task<DebtPaymentAction[]> UpdateDebtPayments(DebtPayment[] debtPayments)
+    {
+      return DebtPaymentUpdateActions;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="debtPaymentIDs"></param>
+    /// <returns></returns>
+    public void SetDeleteDebtPayments(DebtPaymentAction[] debtPayments)
+    {
+      DebtPaymentDeleteActions = debtPayments;
+    }
+
+    /// <summary>
+    /// Used just to set the status of the debt payment entry for when debts need to be taken off hold in DMS (delete pre-work)
+    /// </summary>
+    /// <param name="debtPaymentIDs">Debt payment IDs</param>
+    /// <returns><see cref="DebtPaymentAction"/></returns>
+    public void SetUpdateDebtPayments(DebtPaymentAction[] debtPayments)
+    {
+      DebtPaymentUpdateActions = debtPayments;
+    }
+
+		public void Setclientdebts(List<ClientDebt> clientdebts)
+		{
+			ClientDebts = clientdebts;
+		}
+
+		public Task<DebtPaymentAction[]> SearchClientDebtsByClientId(int clientId)
+    {
+      throw new NotImplementedException();
+    }
+  }
+}

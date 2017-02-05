@@ -1,0 +1,243 @@
+
+        [When(@"the endpoint '(.*)' is called")]
+        public void WhenTheEndpointIsCalled(string endpoint)
+        {
+            response = HttpClient.GetAsync(endpoint).Result;
+        }
+        
+        [Then(@"a valid csv file is returned")]
+        public void ThenAValidCsvFileIsReturned()
+        {
+            Assert.IsTrue(response.IsSuccessStatusCode);
+            Assert.AreEqual(response.Content.Headers.ContentType.MediaType, "text/csv");
+
+            var strCsv = response.Content.ReadAsStringAsync().Result;
+            var csv = new CsvReader(new StringReader(strCsv));
+            //"UCM ID, Date Received, Reference Provided, Amount, Money Received, Client Identification Required
+            while (csv.Read())
+            {
+                Assert.AreEqual(csv.GetField<decimal>(" Amount"), 2.3m);
+                Assert.AreEqual(csv.GetField<string>("UCMReference"), $"UCM{1}");
+                Assert.AreEqual(csv.GetField<string>(" Reference Provided"), "Test WorkflowUCMTransactionData1");
+                Assert.AreEqual(csv.GetField<string>(" Client Identification Required"), "Yes");
+                Assert.AreEqual(csv.GetField<DateTime>(" Date Received"), new DateTime(2016,5,5));
+            }
+        }
+
+
+
+[Then(@"The UCM field defaults to NULL in the database for all imported transactions"), Scope(Feature = "002-API-02")]
+		public void ThenTheUCMFieldDefaultsToNULLInTheDatabaseForAllImportedTransactions()
+		{
+			var response = HttpClient.GetAsync(GetT2TransactionUrlQueryString("?filters[0][name]=isucm&filters[0][operator]=Equals&filters[0][value]=null")).Result;
+			Assert.IsTrue(response.IsSuccessStatusCode);
+
+			QueryResult = response.Content.ReadAsAsync<QueryResults<BankTransactionStatusT2Data>>().Result;
+
+			Assert.IsTrue(QueryResult.Items.All(i => i.IsUcm == null));
+		}
+	}
+
+[Then(@"I should get the error message"), Scope(Feature = "SP8-146-API-02")]
+		public void ThenIShouldGetTheErrorMessage()
+		{
+			var errormessage = response.Content.ReadAsStringAsync().Result;
+			Assert.AreEqual(errormessage, ErrorMessages.UCM.UcmNotFound);
+		}
+	}
+
+
+	var first = QueryResult.Items.ElementAt(0);
+			var second = QueryResult.Items.ElementAt(1);
+			var third = QueryResult.Items.ElementAt(2);
+
+static readonly ConcurrentDictionary<int, WorkflowGroupAuditComment> WorflowGroupAuditComment = new ConcurrentDictionary<int, WorkflowGroupAuditComment>();
+
+
+		public void SaveRemittanceDetail(RemittanceDetail remittanceDetail)
+		{
+			if (remittanceDetail.RemittanceTransactionID != 0)
+			{
+				throw new Exception("Database assigns IDs during Save() method");
+			}
+
+			remittanceDetail.RemittanceTransactionID = RemittanceDetails.Count + 1;
+			if (!RemittanceDetails.TryAdd(remittanceDetail.RemittanceId, remittanceDetail))
+			{
+				throw new Exception("Unable to add remittance details to database");
+			}
+		}
+
+
+public ReconciliationDayBalanceData GetAllBankTransactionStatementBalances(DateTime reconciliationFor)
+		{
+			return ReconciliationDayBalances.Values.FirstOrDefault();
+		}
+
+
+public List<UcmRemittanceDetail> GetListRemittanceDetail(int id)
+		{
+			//getting the bank transaction ids from the remittance details dictionary
+			var bankTransactionIds = RemittanceDetails.Values.Where(rd => rd.RemittanceId == id)
+											.SelectMany(rd => rd.BankTransactionIds)
+											.ToArray();
+
+			//getting the bank transactions based on the ids above
+			var bts = BankTransactions.Values.Where(b => bankTransactionIds.Contains(b.BankTransactionID)).ToList();
+
+			var results = new List<UcmRemittanceDetail>();
+
+			foreach (var bt in bts)
+			{
+				var ucmForBt = UcmTransactions.Values.FirstOrDefault(u => u.BankTransactionID == bt.BankTransactionID);
+
+				results.Add(new UcmRemittanceDetail
+				{
+					RemittanceID = id,
+					BankTransactionID = bt.BankTransactionID,
+					Amount = bt.Amount,
+					BankCode = bt.BankCode,
+					ClassificationTypeID = bt.ClassificationTypeID,
+					Creditor = bt.Creditor,
+					Description = bt.Description,
+					StatementID = bt.StatementID,
+					TransactionDate = bt.TransactionDate,
+					TransactionStatusTypeID = ucmForBt != null ? ucmForBt.TransactionStatusTypeID : null,
+					TransactionReturnReasonTypeID = (byte)TransactionReturnReasonType.Unknown
+				});
+			}
+
+			return results;
+
+		}
+
+
+[When(@"I call the endpoint '(.*)'"), Scope(Feature = "003-API-01")]
+		public void WhenICallTheEndpoint(string endpoint)
+		{
+			string jsonString = JsonConvert.SerializeObject(BankTransactionIDs);
+			var content = new StringContent(jsonString, Encoding.UTF8, _mediaType);
+			var response = HttpClient.PostAsync(endpoint, content).Result;
+
+			Assert.IsTrue(response.IsSuccessStatusCode);
+		}
+
+
+
+		[When(@"The endpoint '(.*)' is called passing the filter object"), Scope(Feature = "002-API-09")]
+		public void WhenTheEndpointIsCalledPassingTheFilterObjectI(string endpoint)
+		{
+			var response = HttpClient.GetAsync(GetT2TransactionUrlQueryString(querystring)).Result;
+			Assert.IsTrue(response.IsSuccessStatusCode);
+			QueryResult = response.Content.ReadAsAsync<QueryResults<BankTransactionStatusT2Data>>().Result;
+		}
+
+		[Then(@"Only transactions greater than or equal to the '(.*)' of £'(.*)' will be retrieved from the database")]
+		public void ThenOnlyTransactionsGreaterThanOrEqualToTheOfWillBeRetrievedFromTheDatabase(string p0, Decimal p1)
+		{
+			Assert.AreEqual(QueryResult.Items.Count(), 2);
+
+			foreach (var item in QueryResult.Items)
+			{
+				var value = item.GetType().GetProperty(p0).GetValue(item, null);
+				Assert.IsTrue((decimal)value >= p1);
+			}
+		}
+
+ [When(@"I call the endpoint '(.*)' with the comment '(.*)'"), Scope(Feature = "003-API-03")]
+        public void WhenICallTheEndpointWithTheComment(string endpoint, string comment)
+        {
+            endpoint = endpoint.Replace("{id:int}", "1");
+            var content = new StringContent(comment, Encoding.UTF8, _mediaType);
+
+            var response = HttpClient.PutAsync(endpoint, content).Result;
+        }
+
+        [Then(@"The comment property is updated to '(.*)'"), Scope(Feature = "003-API-03")]
+        public void ThenTheCommentPropertyIsUpdatedTo(string updatedcomment)
+        {
+
+            var result = GetBankTransaction(1);
+            Assert.AreEqual(updatedcomment, result.Comment);
+        }
+
+
+[When(@"I call the endpoint '(.*)'"), Scope(Feature = "SP10-174-API-01")]
+		public void WhenICallTheEndpoint(string endpoint)
+		{
+			var workflowcomment = new WorkflowGroupAuditComment();
+			{
+				workflowcomment.Author = "Paul";
+				workflowcomment.Comment = "xyz";
+				workflowcomment.WorkflowGroupID = 1;
+			}
+
+			var content = new StringContent(JsonConvert.SerializeObject(workflowcomment), Encoding.UTF8, _mediaType);
+
+			response = HttpClient.PostAsync(endpoint, content).Result;
+		}
+
+		[Then(@"should see the cooment updated in the database"), Scope(Feature = "SP10-174-API-01")]
+		public void ThenShouldSeeTheCoomentUpdatedInTheDatabase()
+		{
+			var updatedcomment = GetWorkFlowGroupAuditComments(1);
+
+			var firstupdatedcomment = updatedcomment.ElementAt(0);
+
+			Assert.AreEqual(firstupdatedcomment.Author, "Debug");
+			Assert.AreEqual(firstupdatedcomment.Comment, "xyz");
+		}
+
+	[When(@"The endpoint '(.*)' is called ordering by Amount for a second time"), Scope(Feature = "005-API-13")]
+		public void WhenTheEndpointIsCalledOrderingByAmountForASecondTime(string p0)
+
+		{
+			querystring = "?top=0&skip=0&orderBy=Amount&orderByDirection=asc";
+
+			response = HttpClient.GetAsync(p0 + querystring).Result;
+			Assert.IsTrue(response.IsSuccessStatusCode);
+
+			QueryResult = response.Content.ReadAsAsync<QueryResults<PotentialUcmMatches>>().Result;
+		}
+
+	public void WhenTheEndpointIsCalledWithTheComment(string endpoint, string comment)
+		{
+			var debtPaymentAction = new DebtPaymentAction
+			{
+				Success = true,
+			};
+
+			SetDebtPaymentAction(debtPaymentAction);
+
+			var jsonString = JsonConvert.SerializeObject(new Comment { Text = comment });
+
+			var content = new StringContent(jsonString, Encoding.UTF8, _mediaType);
+			response = HttpClient.DeleteAsync(endpoint, content).Result;
+		}
+
+
+private readonly MultipartFormDataContent content = new MultipartFormDataContent();
+		private HttpResponseMessage result;
+
+		[Given(@"I have a valid remittance file to upload"), Scope(Feature = "001-API-01")]
+		public void GivenIHaveAValidRemittanceFileToUpload()
+		{
+			AddReconciliationDay(new ReconciliationDayData { ReconciliationFor = DateTime.Now });
+
+			var file = new ByteArrayContent(File.ReadAllBytes(@"Remittance_excel\GoodRemittance.csv"));
+			var receivedDate = new StringContent(DateTime.Parse("01/01/2015").ToShortDateString(), Encoding.UTF8, _mediaType);
+			var forceUpload = new StringContent("false", Encoding.UTF8, _mediaType);
+      var remittanceName = new StringContent("Remittance File #1", Encoding.UTF8, _mediaType);
+
+			file.Headers.ContentDisposition = new ContentDispositionHeaderValue("form-data") { Name = "\"file\"" };
+			file.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.ms-excel");
+
+			receivedDate.Headers.ContentDisposition = new ContentDispositionHeaderValue("form-data") { Name = "\"date\"" };
+			forceUpload.Headers.ContentDisposition = new ContentDispositionHeaderValue("form-data") { Name = "\"forceUpload\"" };
+      remittanceName.Headers.ContentDisposition = new ContentDispositionHeaderValue("form-data") { Name = "\"remittanceName\"" };
+
+      content.Add(file);
+			content.Add(receivedDate);
+			content.Add(forceUpload);
+      content.Add(remittanceName);
+		}
