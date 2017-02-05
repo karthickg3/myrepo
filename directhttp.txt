@@ -1,0 +1,87 @@
+using System;
+using System.IO;
+using System.Net.Http;
+using System.Runtime.Serialization;
+using System.Xml;
+using TechTalk.SpecFlow;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System.Text;
+
+namespace ServicesAutomation.Stepdefinition._10586
+{
+    [Binding]
+    public class _10586_API_01Steps
+    {
+        string content;
+
+
+        [Given(@"I have data in the database"), Scope(Feature = "10586_API_01")]
+        public void GivenIHaveDataInTheDatabase()
+        {
+            //ScenarioContext.Current.Pending();
+        }
+
+
+
+        [When(@"I call the '(.*)' service"), Scope(Feature = "10586_API_01")]
+        public void WhenICallTheService(string service)
+        {
+            using (var client = new HttpClient())
+            {
+                client.DefaultRequestHeaders.Add("Accept", "application/xml");
+                client.DefaultRequestHeaders.Add("User-Agent", "Automated test client");
+
+                HttpResponseMessage message = null;
+                AggregateException ex = null;
+
+                client
+                    .GetAsync(service)
+                    .ContinueWith(task =>
+                    {
+                        if (task.IsFaulted)
+                        {
+                            ex = task.Exception;
+                        }
+                        else
+                        {
+                            message = task.Result;
+                        }
+                    })
+                    .Wait();
+
+                if (ex != null) throw ex;
+
+                content = message.Content.ReadAsStringAsync().Result;
+
+            }
+        }
+
+        [Then(@"I verify the stop field"), Scope(Feature = "10586_API_01")]
+        public void ThenIVerifyTheStopField()
+        {
+            LetterResult result = null;
+
+            using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(content)))
+            {
+                var serialiser = new DataContractSerializer(typeof(LetterResult));
+
+                result = serialiser.ReadObject(stream) as LetterResult;
+            }
+
+            if (result == null)
+            {
+                throw new SerializationException($"Result stream was not an { typeof(LetterResult) }");
+            }
+
+            bool? expectedResult = true;
+            Assert.AreEqual(result.CustomerStopFlag, expectedResult);
+        }
+    }
+
+    [DataContract(Name = "Letter", Namespace = "http://schemas.datacontract.org/2004/07/LetterApi.Domain")]
+    public class LetterResult
+    {
+        [DataMember]
+        public bool? CustomerStopFlag { get; set; }
+    }
+}
