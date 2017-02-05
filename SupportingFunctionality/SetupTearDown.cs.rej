@@ -1,0 +1,10 @@
+diff a/Automation_Testing/SupportingFunctionality/SetupTearDown.cs b/Automation_Testing/SupportingFunctionality/SetupTearDown.cs	(rejected hunks)
+@@ -47,7 +47,7 @@
+             command.ExecuteNonQuery();
+             sqlConnection.Close();
+ 
+-            Driver = new ChromeDriver(@".\Automation_Testing");
++            Driver = new ChromeDriver(@".");
+             Driver.Manage().Window.Maximize();
+ 
+ 
